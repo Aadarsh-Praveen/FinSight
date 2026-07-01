@@ -1,0 +1,2 @@
+# Lint + tests on push.
+# TODO(Phase 10): implement (ruff check . && pytest).

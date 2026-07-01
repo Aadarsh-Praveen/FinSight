@@ -1,0 +1,8 @@
+google-adk~=2.0
+toolbox-core
+google-cloud-bigquery
+google-genai
+pydantic
+python-dotenv
+pytest
+ruff

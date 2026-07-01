@@ -1,0 +1,29 @@
+\# Secrets
+.env
+*.json.key
+service-account*.json
+
+\# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+\# Virtual environments
+.venv/
+venv/
+
+\# Eval outputs
+eval/results/
+
+\# MCP Toolbox binary
+mcp-toolbox/toolbox
+
+\# OS
+.DS_Store
+
+\# IDE
+.vscode/
+.idea/
