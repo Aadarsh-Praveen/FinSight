@@ -7,7 +7,7 @@
 
 | Phase | Name | Status | Commit | Notes |
 |-------|------|--------|--------|-------|
-| 0 | Repo bootstrap & hygiene | ✅ Done | (pending) | venv recreated w/ Python 3.11 |
+| 0 | Repo bootstrap & hygiene | ✅ Done | `120268a` | venv recreated w/ Python 3.11 |
 | 1 | Config & environment plumbing | ⬜ Not started | — | |
 | 2 | Google Cloud + BigQuery readiness | ⬜ Not started | — | |
 | 3 | MCP Toolbox: read-only BigQuery tools | ⬜ Not started | — | |
