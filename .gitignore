@@ -18,6 +18,10 @@ venv/
 \# Eval outputs
 eval/results/
 
+\# adk run/web local session + artifact storage
+.adk/
+*/agents_log/
+
 \# MCP Toolbox binary
 mcp-toolbox/toolbox
 

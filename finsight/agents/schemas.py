@@ -76,3 +76,8 @@ class FinOpsReport(BaseModel):
     evidence: list[str] = Field(description="Concrete cited figures pulled from prior agent state.")
     recommendation: str = Field(description="One concrete, actionable next step.")
     confidence: str = Field(description="One of: high, medium, low, insufficient evidence.")
+    recommendation_status: str = Field(
+        description="Result of calling propose_recommendation: 'pending_human_confirmation' "
+        "(the expected result on a fresh run -- this tool requires human approval before an "
+        "action is considered approved), 'approved', or 'rejected'."
+    )

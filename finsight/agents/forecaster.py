@@ -11,6 +11,7 @@ from google.adk import Agent
 
 from finsight.agents.schemas import ForecastResult
 from finsight.config import settings
+from finsight.guardrails import DEFAULT_AFTER_TOOL_CALLBACKS, sql_readonly_guardrail
 from finsight.tools.finops_tools import compute_baseline_forecast
 from finsight.tools.mcp_bigquery import load_tools
 
@@ -42,6 +43,8 @@ def build_forecaster_agent() -> Agent:
         "current-period revenue.",
         instruction=INSTRUCTION,
         tools=[*load_tools("get_daily_sales"), compute_baseline_forecast],
+        before_tool_callback=sql_readonly_guardrail,
+        after_tool_callback=DEFAULT_AFTER_TOOL_CALLBACKS,
         output_schema=ForecastResult,
         output_key="forecast_result",
     )

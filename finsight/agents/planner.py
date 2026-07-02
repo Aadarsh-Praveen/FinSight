@@ -6,6 +6,7 @@ from google.adk import Agent
 
 from finsight.agents.schemas import InvestigationPlan
 from finsight.config import settings
+from finsight.guardrails import DEFAULT_AFTER_TOOL_CALLBACKS, sql_readonly_guardrail
 from finsight.tools.mcp_bigquery import load_tools
 
 INSTRUCTION = """
@@ -38,6 +39,8 @@ def build_planner_agent() -> Agent:
         "plan, grounded in the dataset's real date coverage.",
         instruction=INSTRUCTION,
         tools=load_tools("get_dataset_date_range"),
+        before_tool_callback=sql_readonly_guardrail,
+        after_tool_callback=DEFAULT_AFTER_TOOL_CALLBACKS,
         output_schema=InvestigationPlan,
         output_key="plan",
     )

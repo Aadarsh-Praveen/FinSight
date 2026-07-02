@@ -6,6 +6,7 @@ from google.adk import Agent
 
 from finsight.agents.schemas import DriverFinding
 from finsight.config import settings
+from finsight.guardrails import DEFAULT_AFTER_TOOL_CALLBACKS, sql_readonly_guardrail
 from finsight.tools.mcp_bigquery import load_tools
 
 INSTRUCTION = """
@@ -35,6 +36,8 @@ def build_investigator_agent() -> Agent:
         "driver.",
         instruction=INSTRUCTION,
         tools=load_tools("get_orders_by_category"),
+        before_tool_callback=sql_readonly_guardrail,
+        after_tool_callback=DEFAULT_AFTER_TOOL_CALLBACKS,
         output_schema=DriverFinding,
         output_key="investigation",
     )

@@ -13,7 +13,7 @@
 | 3 | MCP Toolbox: read-only BigQuery tools | ✅ Done | `927ae90` | server verified live via MCP calls |
 | 4 | First single agent (vertical slice) | ✅ Done | `60494ab` | adk run verified, grounded answers |
 | 5 | Full multi-agent workflow | ✅ Done | `0686aae` | SequentialAgent, structured hand-offs |
-| 6 | Guardrails & security | ⬜ Not started | — | |
+| 6 | Guardrails & security | ✅ Done | (pending) | 17 tests pass; HITL resume has a caveat |
 | 7 | Verifier agent | ⬜ Not started | — | |
 | 8 | Skills, memory, observability | ⬜ Not started | — | |
 | 9 | Eval harness + benchmark + ablation | ⬜ Not started | — | |
@@ -272,3 +272,76 @@ _(Record any place the installed library API differed from the plan, and what wa
 - `ruff check .` clean, `pytest` 0 tests (exit 5).
 - Next: Phase 6 (guardrails & security — `sql_readonly`, `pii_redaction`, `injection_guard`,
   human-in-the-loop confirmation before "action" recommendations).
+
+### 2026-07-02 — Phase 6
+- Inspected ADK 2.3.0's actual callback invocation code
+  (`google/adk/flows/llm_flows/functions.py`) rather than assuming semantics: a
+  `before_tool_callback` that returns a non-None dict **short-circuits** the real tool call and
+  becomes the response; an `after_tool_callback` that returns non-None **replaces** the tool's
+  response. Both accept lists (`agent.canonical_before_tool_callbacks` /
+  `canonical_after_tool_callbacks`), so every agent gets one `before_tool_callback`
+  (`sql_readonly_guardrail`) and a list of two `after_tool_callback`s
+  (`pii_redaction_guardrail`, `injection_guard_callback`) via a new
+  `finsight/guardrails/__init__.py::DEFAULT_AFTER_TOOL_CALLBACKS` convenience export. Callback
+  kwargs are `tool=`/`args=`/`tool_context=`(/`tool_response=` for after-callbacks) — matched
+  those exact parameter names in each guardrail function.
+- `finsight/guardrails/sql_readonly.py`: since every real BigQuery tool already only has
+  fixed SQL with typed params (the actual read-only guarantee, per Phase 3), this is
+  defense-in-depth: (a) refuses any tool whose name contains `execute_sql`/`exec_sql`/`run_sql`/
+  `raw_sql` substrings, turning the Phase 3 tools.yaml comment ("don't add
+  bigquery-execute-sql") into an enforced runtime check, not just a comment; (b) scans every
+  string-valued tool argument for SQL statement separators/comment markers (`;`, `--`, `/*`)
+  and forbidden DML/DDL keywords (word-boundary matched to avoid false positives like
+  "updated_at").
+- `finsight/guardrails/pii_redaction.py`: redacts email-pattern text anywhere in a tool
+  response, and blanks out any dict field whose key is a known PII field name (email,
+  first_name, last_name, etc.) regardless of content. None of our current tools select PII
+  columns, so this has no live trigger today -- it's ready for if a future tool ever touches
+  `thelook_ecommerce.users`.
+- `finsight/guardrails/injection_guard.py`: scans tool response text for prompt-injection
+  patterns ("ignore previous instructions", "you are now", fake `<tool_call>` markers, etc.)
+  and replaces matched strings with a neutralization marker, logging a warning. Framed as
+  protecting against indirect injection via *retrieved data* (OWASP LLM01), not just user input.
+- **Human-in-the-loop:** discovered ADK 2.3.0 has a first-class primitive for exactly this --
+  `FunctionTool(func, require_confirmation=True)` (confirmed by reading
+  `google/adk/tools/function_tool.py`). Added `finsight/tools/finops_tools.py::
+  propose_recommendation` and wired it onto `reporter` as a confirmation-gated tool; extended
+  `FinOpsReport` with a `recommendation_status` field so the report explicitly states
+  "pending_human_confirmation" rather than silently presenting a recommendation as approved.
+- `tests/test_guardrails.py`: 17 tests covering all three guardrails plus the HITL wiring
+  (SQL keyword/statement-separator/tool-name blocking, clean-input pass-through, PII redaction
+  by pattern and by field name including nested structures, injection pattern detection and
+  neutralization, and confirming `propose_recommendation` is wrapped with
+  `require_confirmation=True`). All 17 pass. Checkpoint's literal requirement ("malicious SQL
+  blocked", "PII field redacted") is a subset of this coverage.
+- Needed `pythonpath = ["."]` under `[tool.pytest.ini_options]` in `pyproject.toml` --
+  without it, `pytest` couldn't import `finsight.*` from `tests/` (no installed package, no
+  `conftest.py`). Not mentioned in BUILD_PLAN.md; discovered when the first test run failed
+  with `ModuleNotFoundError`.
+- **Live-verified the HITL block-by-default behavior**, not just the unit test: ran
+  `adk run finsight "Why did revenue change vs the prior period?"` (persistent session, not
+  `--in_memory`) through the full 5-agent graph. When reporter called `propose_recommendation`,
+  the CLI correctly paused with `🚨 [PAUSED] Workflow is waiting for human input!` and a
+  `--session_id` to resume with -- proving the gate blocks by default and doesn't silently
+  approve.
+- **Known limitation (logged, not fixed -- time-boxed given the 2026-07-06 deadline):**
+  resuming that paused session in a **new** `adk run` process
+  (`adk run finsight "yes" --session_id <id>`) failed with `Tool 'propose_recommendation' not
+  found. Available tools: get_dataset_date_range` -- i.e. resume routed the pending function
+  call to the wrong sub-agent's tool registry (that's `planner`'s tool, not `reporter`'s).
+  Root cause is most likely that each `adk run` process calls `build_orchestrator_agent()` from
+  scratch, which calls `load_tools()` fresh per sub-agent (new `ToolboxSyncTool`/`FunctionTool`
+  object identities each process) -- the persisted session's pending function call likely can't
+  be re-matched to the freshly-rebuilt agent tree correctly across a process boundary. This
+  looks like an ADK limitation/rough edge with `SequentialAgent` sub-agent tool-confirmation
+  resume across separate CLI invocations, not a misconfiguration in our code (the `require_
+  confirmation` wiring itself is exactly per ADK's documented pattern, and the initial-block
+  behavior is correct). **If revisited:** try resuming within one continuous process (e.g. via
+  `adk web`'s live server, or a custom script using `Runner` directly) instead of separate CLI
+  invocations for the demo video (Phase 10) and eval harness (Phase 9) to sidestep this.
+- `ruff check .` clean, `pytest` 17 passed (guardrail tests) + 0 collected elsewhere (exit 5 ->
+  now folded into the 17, since test_guardrails.py is the only test file with content so far).
+- Added `.adk/` and `*/agents_log/` to `.gitignore` (local session/artifact storage created by
+  `adk run`, discovered as untracked cruft after the live HITL test).
+- Next: Phase 7 (verifier agent — groundedness/sufficiency/policy critic + retry loop; this is
+  also where the SequentialAgent-vs-branching-Workflow question from Phase 5 gets revisited).

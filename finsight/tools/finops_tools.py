@@ -26,3 +26,21 @@ def compute_baseline_forecast(daily_revenues: list[float], projection_days: int)
         "avg_daily": round(avg_daily, 2),
         "method": f"trailing_average({len(daily_revenues)}d)",
     }
+
+
+def propose_recommendation(recommendation: str, confidence: str) -> dict:
+    """Finalizes a FinOps action recommendation for the report.
+
+    This tool is wrapped with require_confirmation=True (see finsight/agents/reporter.py), so it
+    never runs silently: the first call always comes back pending human approval, and the report
+    must reflect that status rather than presenting the recommendation as already approved.
+
+    Args:
+        recommendation: The concrete recommended action.
+        confidence: The confidence level backing this recommendation (high/medium/low/
+            insufficient evidence).
+
+    Returns:
+        A dict confirming the recommendation was approved and logged.
+    """
+    return {"status": "approved", "recommendation": recommendation, "confidence": confidence}
