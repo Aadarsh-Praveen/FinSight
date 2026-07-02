@@ -129,6 +129,21 @@ parameters:
     type: string
     description: Prior period end date (YYYY-MM-DD), inclusive.
 ---
+kind: tool
+name: get_dataset_date_range
+type: bigquery-sql
+source: finsight-bigquery
+description: >
+  Returns the earliest and latest order date available in the dataset. Call this first when a
+  question uses a relative time reference (e.g. "last month") -- the dataset does not necessarily
+  extend to today, so anchor any relative date range on this result instead of assuming "today".
+statement: |
+  SELECT
+    MIN(DATE(created_at)) AS earliest_date,
+    MAX(DATE(created_at)) AS latest_date
+  FROM `bigquery-public-data.thelook_ecommerce.order_items`;
+parameters: []
+---
 kind: toolset
 name: finops_readonly
 tools:
@@ -136,3 +151,4 @@ tools:
   - get_revenue_by_period
   - get_orders_by_category
   - compare_period_over_period
+  - get_dataset_date_range

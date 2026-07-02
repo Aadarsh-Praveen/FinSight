@@ -25,9 +25,19 @@ def get_toolbox_client() -> ToolboxSyncClient:
 
 
 def load_finops_readonly_tools() -> list[ToolboxSyncTool]:
-    """Loads the finops_readonly toolset: read-only, parameterized BigQuery tools.
+    """Loads the full finops_readonly toolset: read-only, parameterized BigQuery tools.
 
     Requires the MCP Toolbox server (see mcp-toolbox/README.md) to be running at
     settings.toolbox_url.
     """
     return get_toolbox_client().load_toolset(FINOPS_READONLY_TOOLSET)
+
+
+def load_tools(*names: str) -> list[ToolboxSyncTool]:
+    """Loads specific tools by name (least-privilege alternative to the full toolset).
+
+    Use this for graph sub-agents that only need one or two of the finops_readonly tools,
+    rather than handing every agent the entire toolset.
+    """
+    client = get_toolbox_client()
+    return [client.load_tool(name) for name in names]

@@ -1,40 +1,30 @@
 """NL -> SQL over BigQuery via MCP Toolbox (read-only tools).
 
-This is the Phase 4 vertical slice: a single agent that answers plain-English sales/revenue
-questions over `bigquery-public-data.thelook_ecommerce` using the fixed, read-only tools in
-`mcp-toolbox/tools.yaml`. It has no planner/forecaster/investigator/verifier around it yet --
-those land in Phase 5+.
+Phase 5 role: analyst is the top-line data-pull node in the orchestrator graph -- given
+{plan}'s current/prior date ranges, it pulls the overall revenue delta. Category-level and
+daily breakdowns are handled by the investigator and forecaster nodes respectively, so this
+agent only needs one tool.
 """
 
 from __future__ import annotations
 
 from google.adk import Agent
 
+from finsight.agents.schemas import AnalystFindings
 from finsight.config import settings
-from finsight.tools.mcp_bigquery import load_finops_readonly_tools
+from finsight.tools.mcp_bigquery import load_tools
 
 INSTRUCTION = """
-You are FinSight's analyst agent, a FinOps-style investigator for an ecommerce revenue dataset
-(`bigquery-public-data.thelook_ecommerce`).
+You are FinSight's analyst agent. Given {plan} (current_period and prior_period date ranges)
+already in state, pull the top-line revenue and order-count figures for both periods.
 
-You have exactly four read-only tools, each backed by a fixed, parameterized SQL query:
-- get_daily_sales(start_date, end_date): revenue + order count per day in a range.
-- get_revenue_by_period(start_date, end_date): total revenue + order count for one range.
-- get_orders_by_category(start_date, end_date): revenue + order count per product category.
-- compare_period_over_period(current_start, current_end, prior_start, prior_end): revenue +
-  order count for two ranges side by side.
-
-Rules:
-- Every date argument is YYYY-MM-DD.
-- Always answer using these tools. Never invent numbers -- if a question needs data, call a
-  tool first and base your answer only on what it returns.
-- If the question is ambiguous about the date range (e.g. "last month"), do not stall by asking
-  a clarifying question -- pick a concrete, reasonable date range yourself, call the tool, and
-  state the exact range you assumed at the start of your answer.
-- If a question cannot be answered with the available tools (e.g. it needs data outside
-  revenue/orders/category), say so explicitly instead of guessing.
-- Keep answers concise: lead with the direct answer, cite the specific figures you pulled, and
-  name which tool(s) you used.
+Steps:
+1. Read {plan} for current_period and prior_period.
+2. Call compare_period_over_period with current_start/current_end/prior_start/prior_end from
+   {plan}.
+3. Output current and prior PeriodFigures, delta_revenue (current.revenue - prior.revenue), and
+   delta_pct (delta_revenue / prior.revenue * 100, rounded to 2 decimal places; if
+   prior.revenue is 0, report delta_pct as 0).
 """
 
 
@@ -42,11 +32,9 @@ def build_analyst_agent() -> Agent:
     return Agent(
         name="analyst",
         model=settings.model_worker,
-        description="Answers sales/revenue questions over thelook_ecommerce using read-only "
-        "BigQuery tools.",
+        description="Pulls the top-line current-vs-prior revenue delta for the planned periods.",
         instruction=INSTRUCTION,
-        tools=load_finops_readonly_tools(),
+        tools=load_tools("compare_period_over_period"),
+        output_schema=AnalystFindings,
+        output_key="analyst_findings",
     )
-
-
-root_agent = build_analyst_agent()

@@ -12,7 +12,7 @@
 | 2 | Google Cloud + BigQuery readiness | ✅ Done | `871a60e` | fixed location mismatch bug |
 | 3 | MCP Toolbox: read-only BigQuery tools | ✅ Done | `927ae90` | server verified live via MCP calls |
 | 4 | First single agent (vertical slice) | ✅ Done | `60494ab` | adk run verified, grounded answers |
-| 5 | Full multi-agent workflow | ⬜ Not started | — | |
+| 5 | Full multi-agent workflow | ✅ Done | (pending) | SequentialAgent, structured hand-offs |
 | 6 | Guardrails & security | ⬜ Not started | — | |
 | 7 | Verifier agent | ⬜ Not started | — | |
 | 8 | Skills, memory, observability | ⬜ Not started | — | |
@@ -198,3 +198,77 @@ _(Record any place the installed library API differed from the plan, and what wa
 - `ruff check .` clean, `pytest` 0 tests (exit 5).
 - Next: Phase 5 (full multi-agent workflow — planner/analyst/forecaster/investigator/reporter
   composed via an ADK `Workflow`/graph, orchestrator becomes `root_agent`).
+
+### 2026-07-02 — Phase 5
+- **Design choice (structured state, not the "Workflow" graph class):** inspected
+  `google.adk.agents.SequentialAgent` and confirmed it runs sub-agents in a fixed order sharing
+  one session, which is exactly "plan -> pull -> forecast -> investigate -> report." Used that
+  instead of the top-level `google.adk.Workflow`/`Task` API BUILD_PLAN.md mentions, since
+  `SequentialAgent` is the documented, stable primitive for this exact fixed-order pattern in the
+  installed 2.3.0 API and is sufficient for now. `Workflow` remains available if Phase 7's
+  verifier retry-loop needs branching that `SequentialAgent` can't express.
+- **Design choice (structured hand-offs):** confirmed ADK 2.3.0 explicitly supports combining
+  `output_schema` with `tools` on the same `LlmAgent` ("exposing tools during the thought loop,
+  enforcing structure only on the final output" -- see `llm_agent.py` docstring). Added
+  `finsight/agents/schemas.py` with one pydantic model per hand-off
+  (`InvestigationPlan`, `AnalystFindings`, `ForecastResult`, `DriverFinding`, `FinOpsReport`).
+  Each sub-agent sets `output_key`, and downstream agents reference prior state via `{plan}`,
+  `{analyst_findings}`, etc. in their instruction strings -- confirmed this auto-templates via
+  `google/adk/flows/llm_flows/instructions.py`'s `_process_agent_instruction`, not something I
+  need to wire manually. This is the literal "manage shared state so agents pass structured data,
+  not prose" requirement from BUILD_PLAN.md.
+- Added a 5th BigQuery tool, `get_dataset_date_range` (min/max order date), specifically so the
+  new **planner** agent can ground relative time references ("last month") in the dataset's real
+  coverage instead of the model's assumption about "today". Verified via the toolbox's default
+  hot-reload (`--disable-reload` is opt-out, so editing `tools.yaml` needed no server restart) --
+  confirmed the new tool immediately callable, and confirmed the dataset now spans
+  **2019-01-16 to 2026-07-05** (the max date is itself past today, 2026-07-02, reinforcing the
+  Phase 3 finding that this dataset is regenerated/synthetic, not static).
+- Split agent responsibilities to avoid redundant BigQuery calls: `analyst` pulls only the
+  top-line current-vs-prior delta (`compare_period_over_period`); `investigator` independently
+  pulls category breakdowns for both periods (`get_orders_by_category` x2) to compute
+  per-category deltas and name the top driver; `forecaster` pulls prior-period daily figures
+  (`get_daily_sales`) and feeds them through a new pure-Python tool,
+  `finsight/tools/finops_tools.py::compute_baseline_forecast` (trailing-average baseline).
+  Deliberately **not** BigQuery `AI.FORECAST`/TimesFM -- BUILD_PLAN.md's risk register explicitly
+  sanctions a moving-average fallback, and a fast, deterministic, dependency-free baseline is
+  easier to reason about and reproduce in the Phase 9 eval harness than a live model call with
+  unknown quota/latency/cost on a fresh GCP project.
+- Least-privilege tool scoping: added `mcp_bigquery.load_tools(*names)` (loads specific tools by
+  name via `ToolboxSyncClient.load_tool`) alongside the existing `load_finops_readonly_tools()`.
+  Each Phase 5 sub-agent gets only the 1-2 tools its role needs (planner: date range only;
+  analyst: compare only; forecaster: daily sales + baseline compute; investigator: category
+  only), rather than the full toolset -- smaller tool-schema footprint per agent and a concrete,
+  demoable least-privilege story ahead of Phase 6.
+- Model assignment follows BUILD_PLAN.md section 0 exactly: `MODEL_WORKER` (gemini-2.5-flash)
+  for planner/analyst/forecaster/investigator, `MODEL_VERIFIER` (gemini-2.5-pro) for reporter
+  ("stronger model for the verifier and final report writer").
+- Repurposed `analyst.py` for its Phase 5 role (structured top-line pull) rather than keeping the
+  Phase 4 general-Q&A instruction -- `root_agent` now points at the orchestrator, so the old
+  free-form single-agent entrypoint is superseded, not preserved in parallel. Removed the
+  module-level `root_agent = build_analyst_agent()` eager instantiation that Phase 4 had (it did
+  a live toolbox round-trip at import time); Phase 5 agent builders are all lazy, only
+  instantiated when `build_orchestrator_agent()` runs.
+- **Checkpoint verified with real `adk run` calls (not import-only):**
+  - `adk run finsight "Why did revenue change vs the prior period?"` -> full 5-agent trace ran
+    end to end. Planner grounded on real dataset coverage (chose 2026-06-06..07-05 vs
+    2026-05-07..06-05 current 30 days = 30 days.) Analyst found +$376,970.25 (+80.53%). Forecaster
+    confirmed the same surprise vs. its trailing baseline. Investigator found the top category
+    driver ("Outerwear & Coats") explains only 14.86% of the delta. Reporter correctly refused to
+    over-attribute the cause to one category, returned `"confidence": "insufficient evidence"`,
+    and recommended investigating a site-wide cause instead -- exactly the "don't overclaim"
+    behavior Phase 9's benchmark trap cases are meant to test for, showing up naturally already.
+  - A second run with explicit dates ("Compare revenue for 2023-06-01 to 2023-06-30 against the
+    prior 30 days") also worked end to end and returned a `"medium"` confidence, named-driver
+    report -- confirms the graph handles both ambiguous and explicit questions correctly.
+- **Known limitation to revisit:** because `forecaster`'s lookback window is exactly
+  `prior_period` (same dates `analyst` already used) and `projection_days` equals that same
+  period's length, `expected_current_revenue` is currently always numerically identical to
+  `analyst_findings.prior.revenue` -- a mathematically valid trailing-average baseline, but it
+  doesn't yet add information beyond what analyst already established. A real improvement (if
+  time allows, e.g. Phase 8/9 polish) would give forecaster a longer/independent lookback window
+  (e.g. several periods back) so it's a genuinely distinct signal, not a restatement of the prior
+  period.
+- `ruff check .` clean, `pytest` 0 tests (exit 5).
+- Next: Phase 6 (guardrails & security — `sql_readonly`, `pii_redaction`, `injection_guard`,
+  human-in-the-loop confirmation before "action" recommendations).
