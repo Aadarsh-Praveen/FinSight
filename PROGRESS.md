@@ -12,7 +12,7 @@
 | 2 | Google Cloud + BigQuery readiness | ✅ Done | `871a60e` | fixed location mismatch bug |
 | 3 | MCP Toolbox: read-only BigQuery tools | ✅ Done | `927ae90` | server verified live via MCP calls |
 | 4 | First single agent (vertical slice) | ✅ Done | `60494ab` | adk run verified, grounded answers |
-| 5 | Full multi-agent workflow | ✅ Done | (pending) | SequentialAgent, structured hand-offs |
+| 5 | Full multi-agent workflow | ✅ Done | `0686aae` | SequentialAgent, structured hand-offs |
 | 6 | Guardrails & security | ⬜ Not started | — | |
 | 7 | Verifier agent | ⬜ Not started | — | |
 | 8 | Skills, memory, observability | ⬜ Not started | — | |
