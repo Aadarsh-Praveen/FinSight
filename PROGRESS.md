@@ -10,7 +10,7 @@
 | 0 | Repo bootstrap & hygiene | ✅ Done | `120268a` | venv recreated w/ Python 3.11 |
 | 1 | Config & environment plumbing | ✅ Done | `38cd311` | pydantic Settings, fails loudly |
 | 2 | Google Cloud + BigQuery readiness | ✅ Done | `871a60e` | fixed location mismatch bug |
-| 3 | MCP Toolbox: read-only BigQuery tools | ⬜ Not started | — | |
+| 3 | MCP Toolbox: read-only BigQuery tools | 🟡 In progress | — | tools.yaml done, binary pending |
 | 4 | First single agent (vertical slice) | ⬜ Not started | — | |
 | 5 | Full multi-agent workflow | ⬜ Not started | — | |
 | 6 | Guardrails & security | ⬜ Not started | — | |
@@ -99,3 +99,38 @@ _(Record any place the installed library API differed from the plan, and what wa
   — don't hardcode `us-central1` as the dataset location there either.
 - Next: Phase 3 (MCP Toolbox: read-only BigQuery tools) — write `mcp-toolbox/tools.yaml` and
   README; human step to download the toolbox binary for macOS arm64.
+
+### 2026-07-01 — Phase 3 (in progress — waiting on human step)
+- **Deviation from BUILD_PLAN.md (schema format):** the project was renamed
+  `genai-toolbox` -> `mcp-toolbox` (still ships a binary called `toolbox`) and the config
+  schema changed from the plan's assumed single-document `sources: {...}` / `tools: {...}` /
+  `toolset: {...}` nesting to a **multi-document YAML** format, each document starting with
+  `kind: source|tool|toolset`, `name:`, and (for tools) `type: bigquery-sql`. Verified this
+  against the actual ground-truth prebuilt config in the `googleapis/mcp-toolbox` GitHub repo
+  (`internal/prebuiltconfigs/tools/bigquery.yaml`) and the `bigquery-sql` tool doc page, not just
+  blog posts, since a wrong schema would silently fail. `mcp-toolbox/tools.yaml` uses the new
+  format.
+- **Deviation (CLI flag):** the plan assumed `--tools-file`; that flag was removed in v0.31.0.
+  Current flag is `--config` (confirmed v1.6.0, released 2026-07-01, is latest). README updated
+  accordingly.
+- **Deviation (download URL):** bucket moved from `storage.googleapis.com/genai-toolbox/...` to
+  `storage.googleapis.com/mcp-toolbox-for-databases/v<VERSION>/darwin/arm64/toolbox`. Also noted
+  a Homebrew option (`brew install mcp-toolbox`) as an alternative in the README.
+- Wrote `mcp-toolbox/tools.yaml`: one `bigquery` source (`finsight-bigquery`, no forced
+  `location:` — see Phase 2 note; `writeMode: blocked` + `allowedDatasets:
+  [bigquery-public-data.thelook_ecommerce]` + a 1 GiB `maximumBytesBilled` cap as defense in
+  depth, though the real read-only guarantee is that every tool below is a fixed-SQL
+  `bigquery-sql` tool, never `bigquery-execute-sql`) and 4 read-only tools: `get_daily_sales`,
+  `get_revenue_by_period`, `get_orders_by_category`, `compare_period_over_period`, grouped into
+  the `finops_readonly` toolset.
+- Verified real table schemas (`order_items`, `products`, `orders` in `thelook_ecommerce`) via
+  the BigQuery client before writing SQL, rather than guessing field names.
+- Validated `tools.yaml` parses as 6 valid YAML documents (1 source + 4 tools + 1 toolset), and
+  ran the `get_orders_by_category` and `compare_period_over_period` SQL statements directly
+  against BigQuery with real parameters — both returned correctly shaped, sensible results.
+- `ruff check .` clean, `pytest` 0 tests (exit 5) — no Python changed, sanity re-run only.
+- **Blocked on human step:** downloading the `toolbox` v1.6.0 binary for macOS arm64
+  (`mcp-toolbox/README.md` has the exact command) — no outbound binary fetch available to the
+  agent. Once downloaded and run (`./toolbox --config "tools.yaml"` from `mcp-toolbox/`), the
+  Phase 3 checkpoint (server confirms tools loaded) still needs to be verified by the human or in
+  a follow-up turn.

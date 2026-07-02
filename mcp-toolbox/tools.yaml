@@ -1,0 +1,138 @@
+# Read-only, parameterized BigQuery tools for the FinSight analyst agent(s).
+#
+# Security note: the read-only guarantee comes from every `bigquery-sql` tool below having a
+# fixed SELECT statement with typed named parameters (@param) -- there is no bigquery-execute-sql
+# tool in this file, so agents cannot run arbitrary SQL. `writeMode: blocked` on the source is a
+# second layer, but it only restricts bigquery-execute-sql (not present here); the real guarantee
+# is "we only ever write SELECT statements below." Do not add bigquery-execute-sql to this file --
+# see BUILD_PLAN.md Phase 3/6.
+#
+# Schema note: no `location:` is forced on the source. bigquery-public-data datasets (including
+# thelook_ecommerce) live in the "US" multi-region, which differs from GOOGLE_CLOUD_LOCATION
+# (used for Cloud Run, e.g. us-central1) -- forcing a mismatched location previously caused a
+# misleading 403 in scripts/check_bigquery.py (see PROGRESS.md Phase 2). Toolbox auto-detects the
+# correct location per query when `location` is left unset.
+kind: source
+name: finsight-bigquery
+type: bigquery
+project: ${BIGQUERY_PROJECT}
+writeMode: blocked
+allowedDatasets:
+  - "bigquery-public-data.thelook_ecommerce"
+maxQueryResultRows: 1000
+maximumBytesBilled: 1073741824 # 1 GiB safety cap per query
+---
+kind: tool
+name: get_daily_sales
+type: bigquery-sql
+source: finsight-bigquery
+description: >
+  Returns total daily revenue and completed order-item count for each day in a date range,
+  ordered by date. Use this to spot day-by-day trends or single-day anomalies.
+statement: |
+  SELECT
+    DATE(created_at) AS order_date,
+    COUNT(DISTINCT order_id) AS order_count,
+    ROUND(SUM(sale_price), 2) AS revenue
+  FROM `bigquery-public-data.thelook_ecommerce.order_items`
+  WHERE DATE(created_at) BETWEEN @start_date AND @end_date
+  GROUP BY order_date
+  ORDER BY order_date;
+parameters:
+  - name: start_date
+    type: string
+    description: Start date (YYYY-MM-DD), inclusive.
+  - name: end_date
+    type: string
+    description: End date (YYYY-MM-DD), inclusive.
+---
+kind: tool
+name: get_revenue_by_period
+type: bigquery-sql
+source: finsight-bigquery
+description: >
+  Returns total revenue and order-item count summed over a single date range. Use this for a
+  quick top-line total before drilling into daily or category breakdowns.
+statement: |
+  SELECT
+    ROUND(SUM(sale_price), 2) AS revenue,
+    COUNT(DISTINCT order_id) AS order_count
+  FROM `bigquery-public-data.thelook_ecommerce.order_items`
+  WHERE DATE(created_at) BETWEEN @start_date AND @end_date;
+parameters:
+  - name: start_date
+    type: string
+    description: Start date (YYYY-MM-DD), inclusive.
+  - name: end_date
+    type: string
+    description: End date (YYYY-MM-DD), inclusive.
+---
+kind: tool
+name: get_orders_by_category
+type: bigquery-sql
+source: finsight-bigquery
+description: >
+  Returns revenue and order-item count broken down by product category for a date range, ordered
+  by revenue descending. Use this to find which category is driving a revenue change.
+statement: |
+  SELECT
+    p.category AS category,
+    ROUND(SUM(oi.sale_price), 2) AS revenue,
+    COUNT(DISTINCT oi.order_id) AS order_count
+  FROM `bigquery-public-data.thelook_ecommerce.order_items` AS oi
+  JOIN `bigquery-public-data.thelook_ecommerce.products` AS p
+    ON oi.product_id = p.id
+  WHERE DATE(oi.created_at) BETWEEN @start_date AND @end_date
+  GROUP BY category
+  ORDER BY revenue DESC;
+parameters:
+  - name: start_date
+    type: string
+    description: Start date (YYYY-MM-DD), inclusive.
+  - name: end_date
+    type: string
+    description: End date (YYYY-MM-DD), inclusive.
+---
+kind: tool
+name: compare_period_over_period
+type: bigquery-sql
+source: finsight-bigquery
+description: >
+  Compares total revenue and order-item count between a current period and a prior period (each
+  defined by its own start/end date). Use this to quantify a period-over-period change before
+  investigating its cause.
+statement: |
+  SELECT
+    'current' AS period,
+    ROUND(SUM(sale_price), 2) AS revenue,
+    COUNT(DISTINCT order_id) AS order_count
+  FROM `bigquery-public-data.thelook_ecommerce.order_items`
+  WHERE DATE(created_at) BETWEEN @current_start AND @current_end
+  UNION ALL
+  SELECT
+    'prior' AS period,
+    ROUND(SUM(sale_price), 2) AS revenue,
+    COUNT(DISTINCT order_id) AS order_count
+  FROM `bigquery-public-data.thelook_ecommerce.order_items`
+  WHERE DATE(created_at) BETWEEN @prior_start AND @prior_end;
+parameters:
+  - name: current_start
+    type: string
+    description: Current period start date (YYYY-MM-DD), inclusive.
+  - name: current_end
+    type: string
+    description: Current period end date (YYYY-MM-DD), inclusive.
+  - name: prior_start
+    type: string
+    description: Prior period start date (YYYY-MM-DD), inclusive.
+  - name: prior_end
+    type: string
+    description: Prior period end date (YYYY-MM-DD), inclusive.
+---
+kind: toolset
+name: finops_readonly
+tools:
+  - get_daily_sales
+  - get_revenue_by_period
+  - get_orders_by_category
+  - compare_period_over_period
