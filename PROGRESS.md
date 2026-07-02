@@ -707,3 +707,36 @@ the results table + MAST breakdown.
   `CONCURRENCY` from 6 to 3 to reduce how often the underlying 429 triggers at all. Verified the
   fix with a 3-trial smoke test (one trial per config) before re-committing to the full run.
 - Killed the stuck process, relaunched the full run with the fix.
+
+### 2026-07-02 — Real root cause found: concurrency deadlock, not rate limiting; run trimmed and relaunched serially
+The `CONCURRENCY=3` relaunch (with unbuffered output for reliable monitoring, which also
+surfaced that the *first* relaunch's total silence was just stdout block-buffering, not a
+stall) completed all 261 trials, but **230/261 (88%) timed out**, including **100%** of both
+multi-agent configs (only `single_agent`, at 36%, produced any real data). Investigated before
+re-running blindly: the raw log had exactly **1** literal "429" across 33,658 lines, ruling out
+sustained quota exhaustion as the cause despite the earlier finding pointing that direction.
+Direct A/B test: ran `multi_agent_no_verifier` and `multi_agent_verifier` on the same task with
+**zero** concurrency (no `ThreadPoolExecutor` at all) -- both succeeded cleanly (84s, 129s, real
+reports, no errors). Root cause confirmed: running multiple `Runner.run()` calls **concurrently**
+(each spawning its own internal thread + event loop) deadlocks them outright -- a second,
+distinct ADK concurrency bug from the 429-in-internal-thread one found earlier, not a rate-limit
+problem at all.
+
+User's call: go fully serial (`CONCURRENCY=1`, proven reliable), keep `TRIALS_PER_TASK=3` (don't
+sacrifice the mean+spread statistic), and instead trim the task count from 30 to 20 to fit a
+serial run in a practical timeframe -- preserving category balance so the headline findings stay
+statistically visible. Added `ABLATION_TASK_IDS` (20 tasks): `insufficient_evidence` 8/11 (kept
+all 3 "hard" subtle-trap tasks, dropped the 3 most redundant), `adversarial` 5/5 (all kept,
+including `adv-005` and `adv-001` -- the two highest-value findings), `clean_attribution` 5/8
+safe-to-score (one flat example kept, spread across years/categories), `ambiguous_scope` 2/5
+(kept the two least-similar phrasings). Confirmed the exact kept/cut list with the user before
+launching.
+
+Also added incremental result writes (`eval/results/ablation_trials.jsonl`, one line per
+completed trial, flushed immediately, via a new `run_all_trials(..., incremental_path=...)`
+param and `main() --report-only` recovery mode that reads the JSONL directly) so a crash
+partway through a now much-longer serial run costs at most the in-flight trial, not the whole
+run's progress.
+
+Relaunched: `CONCURRENCY=1`, 20 tasks x 3 configs x 3 trials = 180 total trials, running
+unattended.

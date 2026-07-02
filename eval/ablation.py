@@ -15,6 +15,21 @@ Pre-flight re-verification: before scoring, every clean_attribution task's struc
 truth (direction, still-leading driver, still-comparable margin) is re-queried against the live
 dataset. A task whose ground truth has flipped is excluded from scoring for this run, with a
 warning -- never silently scored against stale truth.
+
+Concurrency and task selection: CONCURRENCY=1 (fully serial). A concurrent run (3 workers) was
+tried first and found a real bug -- google-adk's Runner.run() spawns its own internal thread +
+event loop per call, and running 2-3 of these concurrently deadlocks them (confirmed via a direct
+A/B test: the exact same tasks that failed ~100% concurrently succeeded 100% run serially, with
+essentially zero actual 429s in the concurrent run's log despite the mass timeout -- so it's a
+threading bug, not a quota problem). Serial execution is much slower, so ABLATION_TASK_IDS trims
+the benchmark to ~20 tasks (from 30) to fit a ~3 hour run, deliberately keeping
+insufficient_evidence and adversarial (the two categories that most directly test the verifier's
+actual job) nearly intact and trimming clean_attribution/ambiguous_scope, which have more
+redundant examples. See PROGRESS.md for the exact kept/cut list and rationale.
+
+Results are written incrementally (eval/results/ablation_trials.jsonl, one line per completed
+trial, flushed immediately) so a crash partway through a multi-hour run costs at most the
+in-flight trial, not the whole run.
 """
 
 from __future__ import annotations
@@ -43,11 +58,46 @@ from finsight.config import settings
 from finsight.tools.mcp_bigquery import load_finops_readonly_tools
 
 TRIALS_PER_TASK = 3
-CONCURRENCY = 3
+CONCURRENCY = 1
 # multi_agent_verifier trials can legitimately take a few hundred seconds (up to 3 retry
 # iterations x ~5 sequential agent calls each) without anything being wrong -- set generously
 # enough to avoid false-positive timeouts on real, working, just-slow trials.
 PER_TRIAL_TIMEOUT_SECONDS = 420.0
+
+# Trimmed from the full 30-task benchmark to ~20 tasks so a fully-serial run (required -- see
+# module docstring) fits ~3 hours instead of ~6. insufficient_evidence and adversarial (the two
+# categories that most directly test the verifier's actual job -- refusal and injection
+# resistance) are kept nearly intact; clean_attribution and ambiguous_scope, which have more
+# redundant examples of the same underlying behavior, are trimmed harder.
+ABLATION_TASK_IDS = [
+    # insufficient_evidence: 8 of 11 -- dropped customer-sentiment, staffing, refund-reasons
+    # (most redundant with what's kept; kept all 3 "hard" subtle-trap tasks).
+    "insuff-001-marketing-spend",
+    "insuff-002-competitor-pricing",
+    "insuff-004-inventory-stockouts",
+    "insuff-005-regional-breakdown",
+    "insuff-006-profit-margin",
+    "insuff-007-weather",
+    "insuff-009-sku-level",
+    "insuff-010-channel-attribution",
+    # adversarial: all 5 kept, especially adv-005 (analyst-corruption) and adv-001 (injected-
+    # recommendation) -- the two highest-value findings from the sample run.
+    "adv-001-injection-fabricate",
+    "adv-002-fake-system-override",
+    "adv-003-persona-hijack",
+    "adv-004-translate-execute",
+    "adv-005-user-supplied-fake-data",
+    # clean_attribution: 5 of 8 safe-to-score (clean-009 already excluded by pre-flight) --
+    # dropped clean-004/007/008; kept one flat example (clean-005) and spread across years.
+    "clean-001-outerwear-nov23",
+    "clean-002-suits-dec23",
+    "clean-003-dresses-jul19",
+    "clean-005-flat-jul23",
+    "clean-006-outerwear-apr22",
+    # ambiguous_scope: 2 of 5 -- kept the two least-similar phrasings, dropped 3 near-duplicates.
+    "ambig-001-lately",
+    "ambig-004-this-year",
+]
 RESULTS_DIR = Path(__file__).parent / "results"
 
 APP_NAME = "finsight-ablation"
@@ -328,8 +378,17 @@ def run_single_trial(config_name: str, task: dict[str, Any], trial_idx: int) -> 
 
 
 def run_all_trials(
-    tasks: list[dict[str, Any]], trials_per_task: int = TRIALS_PER_TASK
+    tasks: list[dict[str, Any]],
+    trials_per_task: int = TRIALS_PER_TASK,
+    incremental_path: Path | None = None,
 ) -> list[dict[str, Any]]:
+    """Runs every (config, task, trial) job.
+
+    If incremental_path is given, it's opened fresh (truncated) and each result is appended as
+    one JSON line and flushed to disk immediately after that trial completes -- so a crash
+    partway through a long serial run costs at most the one in-flight trial, not everything
+    completed so far. Recover partial results with `load_jsonl(incremental_path)`.
+    """
     jobs = [
         (config_name, task, trial_idx)
         for config_name in CONFIGS
@@ -338,6 +397,17 @@ def run_all_trials(
     ]
     print(f"[ablation] {len(jobs)} total trials across {len(CONFIGS)} configs x {len(tasks)} "
           f"tasks x {trials_per_task} trials")
+
+    results: list[dict[str, Any]] = []
+    incremental_file = None
+    if incremental_path is not None:
+        incremental_file = open(incremental_path, "w")  # noqa: SIM115 - held open for the run
+
+    def _record(result: dict[str, Any]) -> None:
+        results.append(result)
+        if incremental_file is not None:
+            incremental_file.write(json.dumps(result) + "\n")
+            incremental_file.flush()
 
     # Known issue, worked around here rather than in google-adk: when Runner.run() (the sync
     # wrapper) hits an unhandled 429 from Vertex AI, the exception occurs inside ADK's own
@@ -349,8 +419,10 @@ def run_all_trials(
     # internal thread from here, so instead: poll with a timeout and give up on any individual
     # trial that's been pending too long, rather than letting one dead worker hang the whole run.
     # The abandoned worker thread leaks as a zombie for the rest of the process's life (harmless,
-    # just wasted memory) but no longer blocks progress.
-    results: list[dict[str, Any]] = []
+    # just wasted memory) but no longer blocks progress. Also confirmed separately that running
+    # multiple Runner.run() calls CONCURRENTLY (not just the 429 case) can deadlock outright --
+    # see the module docstring -- which is why CONCURRENCY defaults to 1 now; this timeout
+    # machinery is kept as a safety net regardless.
     start = time.time()
     total = len(jobs)
     pool = ThreadPoolExecutor(max_workers=CONCURRENCY)
@@ -381,7 +453,7 @@ def run_all_trials(
                     "judge_verdict": None,
                     "programmatic": {"error": str(exc)},
                 }
-            results.append(result)
+            _record(result)
             elapsed = time.time() - start
             print(
                 f"[ablation] {len(results)}/{total} done ({elapsed:.0f}s elapsed): "
@@ -397,7 +469,7 @@ def run_all_trials(
                     f"[ablation] TIMEOUT giving up on {config_name}:{task_id}:trial{trial_idx} "
                     f"after {PER_TRIAL_TIMEOUT_SECONDS:.0f}s (likely a hung ADK internal thread)"
                 )
-                results.append(
+                _record(
                     {
                         "config": config_name,
                         "task_id": task_id,
@@ -418,7 +490,14 @@ def run_all_trials(
         pending = still_pending
 
     pool.shutdown(wait=False)
+    if incremental_file is not None:
+        incremental_file.close()
     return results
+
+
+def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    with open(path) as f:
+        return [json.loads(line) for line in f if line.strip()]
 
 
 # --- Aggregation and reporting ---------------------------------------------------------------
@@ -547,32 +626,42 @@ def main() -> None:
     import sys
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    raw_path = RESULTS_DIR / "ablation_raw_trials.json"
-
-    if len(sys.argv) > 1 and sys.argv[1] == "--report-only":
-        with open(raw_path) as f:
-            saved = json.load(f)
-        tasks, _ = preflight_reverify(load_tasks())
-        aggregate_and_report(saved["trials"], tasks)
-        return
+    incremental_path = RESULTS_DIR / "ablation_trials.jsonl"
+    final_path = RESULTS_DIR / "ablation_raw_trials.json"
 
     all_tasks = load_tasks()
-    print(f"[ablation] loaded {len(all_tasks)} tasks")
+    tasks_by_id = {t["id"]: t for t in all_tasks}
+    selected_tasks = [tasks_by_id[tid] for tid in ABLATION_TASK_IDS if tid in tasks_by_id]
+    missing = set(ABLATION_TASK_IDS) - set(tasks_by_id)
+    if missing:
+        raise SystemExit(f"ABLATION_TASK_IDS references unknown task IDs: {sorted(missing)}")
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--report-only":
+        # Recovery path: read whatever's in the incremental file (works even if the run
+        # crashed or was interrupted partway through -- see run_all_trials' docstring).
+        trial_results = load_jsonl(incremental_path)
+        tasks, _ = preflight_reverify(selected_tasks)
+        print(f"[ablation] loaded {len(trial_results)} trials from {incremental_path}")
+        aggregate_and_report(trial_results, tasks)
+        return
+
+    print(f"[ablation] loaded {len(all_tasks)} tasks, trimmed to {len(selected_tasks)} for "
+          f"this run (see ABLATION_TASK_IDS)")
 
     print("[ablation] pre-flight re-verification of clean_attribution ground truth...")
-    tasks, preflight_warnings = preflight_reverify(all_tasks)
+    tasks, preflight_warnings = preflight_reverify(selected_tasks)
     print(
-        f"[ablation] {len(tasks)}/{len(all_tasks)} tasks safe to score "
+        f"[ablation] {len(tasks)}/{len(selected_tasks)} tasks safe to score "
         f"({len(preflight_warnings)} excluded)"
     )
 
-    trial_results = run_all_trials(tasks, TRIALS_PER_TASK)
+    trial_results = run_all_trials(tasks, TRIALS_PER_TASK, incremental_path=incremental_path)
 
-    with open(raw_path, "w") as f:
+    with open(final_path, "w") as f:
         json.dump(
             {"preflight_warnings": preflight_warnings, "trials": trial_results}, f, indent=2
         )
-    print(f"[ablation] wrote {len(trial_results)} raw trial results to {raw_path}")
+    print(f"[ablation] wrote {len(trial_results)} raw trial results to {final_path}")
 
     aggregate_and_report(trial_results, tasks)
 
