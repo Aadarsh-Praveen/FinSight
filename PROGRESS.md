@@ -10,7 +10,7 @@
 | 0 | Repo bootstrap & hygiene | ✅ Done | `120268a` | venv recreated w/ Python 3.11 |
 | 1 | Config & environment plumbing | ✅ Done | `38cd311` | pydantic Settings, fails loudly |
 | 2 | Google Cloud + BigQuery readiness | ✅ Done | `871a60e` | fixed location mismatch bug |
-| 3 | MCP Toolbox: read-only BigQuery tools | 🟡 In progress | `927ae90` | tools.yaml done, binary pending |
+| 3 | MCP Toolbox: read-only BigQuery tools | ✅ Done | `927ae90` | server verified live via MCP calls |
 | 4 | First single agent (vertical slice) | ⬜ Not started | — | |
 | 5 | Full multi-agent workflow | ⬜ Not started | — | |
 | 6 | Guardrails & security | ⬜ Not started | — | |
@@ -27,13 +27,13 @@ Status key: ⬜ Not started · 🟡 In progress · ✅ Done · ⚠️ Blocked
 - Region: `us-central1`
 - Dataset: `bigquery-public-data.thelook_ecommerce` (default)
 - ADK version installed: `google-adk` 2.3.0
-- MCP Toolbox version: not yet downloaded (Phase 3)
+- MCP Toolbox version: `1.6.0+dev.darwin.arm64`, running locally on `http://127.0.0.1:5000`
 
 ## Open blockers (things waiting on the human)
 - [x] GCP project created + billing enabled
 - [x] `gcloud auth application-default login` done (account: aadarshfinsight@gmail.com)
 - [x] `.env` filled from `.env.example`
-- [ ] MCP Toolbox binary downloaded for the correct OS (macOS arm64) — Phase 3
+- [x] MCP Toolbox binary downloaded for the correct OS (macOS arm64) — Phase 3, running as PID
 - [x] Official Kaggle deadline confirmed: **July 6, 2026** (user-confirmed 2026-07-01)
 
 ## Deviations from BUILD_PLAN.md
@@ -134,3 +134,36 @@ _(Record any place the installed library API differed from the plan, and what wa
   agent. Once downloaded and run (`./toolbox --config "tools.yaml"` from `mcp-toolbox/`), the
   Phase 3 checkpoint (server confirms tools loaded) still needs to be verified by the human or in
   a follow-up turn.
+
+### 2026-07-02 — Phase 3 checkpoint verified (server running)
+- User downloaded and started the binary (`toolbox --config tools.yaml`, PID confirmed via `ps`,
+  listening on `127.0.0.1:5000`). Root endpoint returns the toolbox banner; server reports
+  `serverInfo.version = "1.6.0+dev.darwin.arm64"` via a raw MCP `initialize` JSON-RPC call
+  (matches the version pinned in the README).
+- Note: `/api/toolset/*` (the old genai-toolbox HTTP API) is disabled by default in this
+  version — returns `410 Gone` pointing at the `/mcp` JSON-RPC endpoint instead. Verified tool
+  loading via a real `tools/list` JSON-RPC call instead: all 4 tools present
+  (`get_revenue_by_period`, `get_orders_by_category`, `compare_period_over_period`,
+  `get_daily_sales`) with the exact names/descriptions/parameter schemas from `tools.yaml`.
+- Ran a live `tools/call` for `get_revenue_by_period(start_date=2023-01-01, end_date=2023-01-31)`
+  through the running server: `{"revenue":91939.83,"order_count":1083}` — real, grounded data,
+  confirming the full path (MCP client -> toolbox -> ADC -> BigQuery) works end to end.
+- **Important finding for Phase 9 (eval benchmark):** re-ran the identical query directly against
+  BigQuery (bypassing the toolbox) and got the same numbers just now, confirming the toolbox
+  itself is correct — but this **does not match** the result for the same date range from
+  Phase 3's earlier verification the previous day (91239.50 / 1124 orders vs today's 91939.83 /
+  1083 orders). `bigquery-public-data.thelook_ecommerce` appears to be a **periodically
+  regenerated/synthetic dataset**, not a fixed static snapshot. This means eval benchmark
+  ground-truth answers (Phase 9) that hardcode expected numbers could go stale between when the
+  benchmark is authored and when it's run. Will need to either (a) snapshot the query results
+  used as ground truth close to eval-run time, or (b) design benchmark expectations around
+  relative/structural correctness (e.g. "category X has the highest revenue") rather than exact
+  dollar figures, or (c) materialize a frozen copy of the dataset into our own project. Revisit
+  when building `eval/benchmark/finops_tasks.jsonl`.
+- MCP tool annotations returned by the server show `"readOnlyHint": false, "destructiveHint":
+  true` for all 4 tools — this is a generic default the toolbox applies to the `bigquery-sql`
+  tool type (since the type could theoretically run non-SELECT SQL depending on `writeMode`),
+  not a reflection of our actual fixed-SELECT queries. Don't rely on MCP tool annotations as a
+  safety signal in Phase 6 guardrails — enforce read-only via our own `sql_readonly` guardrail
+  and the fixed SQL in `tools.yaml`, as already planned.
+- Phase 3 checkpoint fully met. Next: Phase 4 (first single agent — analyst vertical slice).
