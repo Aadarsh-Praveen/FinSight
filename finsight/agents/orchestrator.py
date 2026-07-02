@@ -29,7 +29,9 @@ from finsight.config import settings
 MAX_VERIFICATION_ATTEMPTS = 3
 
 
-def build_orchestrator_agent(enable_verifier: bool | None = None) -> SequentialAgent:
+def build_orchestrator_agent(
+    enable_verifier: bool | None = None, require_recommendation_confirmation: bool = True
+) -> SequentialAgent:
     """Builds the orchestrator.
 
     Args:
@@ -38,6 +40,9 @@ def build_orchestrator_agent(enable_verifier: bool | None = None) -> SequentialA
             (False). Defaults to settings.enable_verifier (env var ENABLE_VERIFIER) when None.
             Takes an explicit override -- rather than only reading the environment -- so the
             Phase 9 ablation can build both variants in one process without touching env vars.
+        require_recommendation_confirmation: passed straight through to build_reporter_agent.
+            Set False for automated eval runs with no human available to approve -- see that
+            function's docstring for why.
     """
     if enable_verifier is None:
         enable_verifier = settings.enable_verifier
@@ -52,7 +57,7 @@ def build_orchestrator_agent(enable_verifier: bool | None = None) -> SequentialA
                 build_analyst_agent(),
                 build_forecaster_agent(),
                 build_investigator_agent(),
-                build_reporter_agent(),
+                build_reporter_agent(require_confirmation=require_recommendation_confirmation),
                 build_verifier_agent(),
             ],
         )
@@ -65,7 +70,7 @@ def build_orchestrator_agent(enable_verifier: bool | None = None) -> SequentialA
                 build_analyst_agent(),
                 build_forecaster_agent(),
                 build_investigator_agent(),
-                build_reporter_agent(),
+                build_reporter_agent(require_confirmation=require_recommendation_confirmation),
             ],
         )
 

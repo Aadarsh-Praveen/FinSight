@@ -51,13 +51,25 @@ Steps:
 """
 
 
-def build_reporter_agent() -> Agent:
+def build_reporter_agent(require_confirmation: bool = True) -> Agent:
+    """Builds the reporter.
+
+    Args:
+        require_confirmation: gate propose_recommendation behind ADK's HITL tool-confirmation
+            (the real product behavior, default True). Set False for automated contexts with no
+            human to approve -- e.g. eval/run_eval.py -- where every run would otherwise pause on
+            propose_recommendation's first call. See PROGRESS.md Phase 7: resuming that pause is
+            broken for confirmations raised inside a nested SequentialAgent>LoopAgent>LlmAgent
+            hierarchy, so eval runs can't drive the real confirm/reject flow anyway -- eval scores
+            report *content* (grounding, calibration, refusal, injection-resistance), not the
+            separate HITL mechanism, which already has its own dedicated tests.
+    """
     return Agent(
         name="reporter",
         model=settings.model_verifier,
         description="Synthesizes the final structured, cited FinOps report.",
         instruction=INSTRUCTION,
-        tools=[FunctionTool(propose_recommendation, require_confirmation=True)],
+        tools=[FunctionTool(propose_recommendation, require_confirmation=require_confirmation)],
         after_tool_callback=DEFAULT_AFTER_TOOL_CALLBACKS,
         output_schema=FinOpsReport,
         output_key="report",
