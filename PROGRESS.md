@@ -13,7 +13,7 @@
 | 3 | MCP Toolbox: read-only BigQuery tools | ✅ Done | `927ae90` | server verified live via MCP calls |
 | 4 | First single agent (vertical slice) | ✅ Done | `60494ab` | adk run verified, grounded answers |
 | 5 | Full multi-agent workflow | ✅ Done | `0686aae` | SequentialAgent, structured hand-offs |
-| 6 | Guardrails & security | ✅ Done | (pending) | 17 tests pass; HITL resume has a caveat |
+| 6 | Guardrails & security | ✅ Done | `1aaaac2` | 17 tests pass; HITL resume has a caveat |
 | 7 | Verifier agent | ⬜ Not started | — | |
 | 8 | Skills, memory, observability | ⬜ Not started | — | |
 | 9 | Eval harness + benchmark + ablation | ⬜ Not started | — | |
