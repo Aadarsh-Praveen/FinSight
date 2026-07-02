@@ -34,6 +34,11 @@ class Settings(BaseModel):
     model_verifier: str
     toolbox_url: str
     enable_tracing: bool = False
+    enable_verifier: bool = True
+    """Whether the orchestrator's retry loop includes the verifier critic. Toggle for the
+    Phase 9 with-verifier vs. without-verifier ablation; build_orchestrator_agent() also accepts
+    an explicit override so eval/ablation.py can construct both variants in one process without
+    touching the environment."""
 
     @model_validator(mode="after")
     def _require_api_key_for_ai_studio(self) -> Settings:
@@ -68,6 +73,7 @@ def load_settings() -> Settings:
             model_verifier=os.environ["MODEL_VERIFIER"],
             toolbox_url=os.environ["TOOLBOX_URL"],
             enable_tracing=_bool_from_env("ENABLE_TRACING"),
+            enable_verifier=_bool_from_env("ENABLE_VERIFIER", default="TRUE"),
         )
     except ValidationError as exc:
         raise RuntimeError(f"Invalid configuration: {exc}") from exc
@@ -90,6 +96,7 @@ def _print_settings() -> None:
     print(f"  MODEL_VERIFIER            = {settings.model_verifier}")
     print(f"  TOOLBOX_URL               = {settings.toolbox_url}")
     print(f"  ENABLE_TRACING            = {settings.enable_tracing}")
+    print(f"  ENABLE_VERIFIER           = {settings.enable_verifier}")
 
 
 if __name__ == "__main__":

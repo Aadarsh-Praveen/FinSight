@@ -420,3 +420,45 @@ _(Record any place the installed library API differed from the plan, and what wa
 - `ruff check .` clean; `pytest` 19 passed (2 of them `@pytest.mark.llm`, real network calls).
 - Next: Phase 8 (skills, memory, observability) -- per the risk register, this is one of the
   first things to cut further if Phase 9 (eval harness, higher priority) needs the time.
+
+### 2026-07-02 — Phase 7 rigor pass (user-requested, before moving on)
+User asked for the verifier to be verified properly rather than taken on faith, before touching
+Phase 8/9. Four things, all done:
+
+1. **Real before/after report text**, not just pass/fail. Wrote a one-off fault-injection
+   script (scratchpad, not committed) that poisons the reporter's *first* attempt only
+   (conditioned on `{verification?}` not yet existing) to fabricate a `$999,999.99` revenue
+   figure, then runs the real, unmodified verifier + LoopAgent retry exactly as built. Result:
+   iteration 1's report claimed the fabricated figure; verifier caught it
+   (`groundedness_ok: false`, critique named the correct real figure, `$376,970.25`); iteration
+   2's report cited only real, correctly-grounded figures throughout and verifier passed it.
+   Full JSON for both iterations captured in this session's transcript.
+2. **The loop genuinely closes, not catch-only.** Confirmed via direct event-stream inspection
+   (not inference): of 26 total events in that run, exactly 1 had `escalate=True`, authored by
+   `verifier`, carrying `state_delta: ['verification_passed']` -- precisely matching the
+   `after_agent_callback` design. The loop ran exactly 2 reporter iterations (of a 3-max
+   budget) and stopped there. Confirmed this is *not* a cousin of the HITL nested-resume bug:
+   that bug is specifically about resuming a **paused** invocation (`long_running_tool_ids` /
+   `request_confirmation`) across a break in `run_async` iteration. The LoopAgent's internal
+   retry never pauses -- it's a single continuous `run_async` call restarting sub-agents
+   in-process, a completely different code path. No pause/resume machinery is exercised by a
+   normal (non-HITL) retry.
+3. **Verifier is now toggle-able.** Added `ENABLE_VERIFIER` (default `TRUE`) to
+   `finsight/config.py` and `.env`/`.env.example`. `build_orchestrator_agent()` in
+   `orchestrator.py` now takes an optional `enable_verifier: bool | None` override (falls back
+   to `settings.enable_verifier` when `None`) so `eval/ablation.py` (Phase 9) can construct both
+   the with-verifier (`LoopAgent` + retry) and without-verifier
+   (`SequentialAgent`, straight through, no retry) variants in one process without touching env
+   vars. Verified both construct correctly.
+4. **SQL guardrail false-positive check.** Directly exercised `check_sql_injection` against the
+   user's exact examples plus more: "show me updated inventory", "orders by category", "the
+   created_at column", "order_count and updated_at fields", "callback function for updated
+   records", "recreate the dashboard", "a well-executed campaign" -- all pass through unblocked
+   (the `\bupdate\b`-style word-boundary regexes correctly don't match "updated"/"created_at"/
+   "callback"/etc. since there's no boundary before the trailing letters). Malicious cases
+   (`'; DROP TABLE ...`, an `execute_sql` tool name) still correctly blocked.
+
+Committed the `ENABLE_VERIFIER` toggle as a standalone follow-up to the Phase 7 commit. The
+fault-injection script itself was not committed (scratchpad, one-off) -- offered to turn it into
+a permanent regression test in `tests/test_verifier.py` if wanted, but that's additional scope
+beyond what was asked for in this pass.

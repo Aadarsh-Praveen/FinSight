@@ -24,32 +24,59 @@ from finsight.agents.investigator import build_investigator_agent
 from finsight.agents.planner import build_planner_agent
 from finsight.agents.reporter import build_reporter_agent
 from finsight.agents.verifier import build_verifier_agent
+from finsight.config import settings
 
 MAX_VERIFICATION_ATTEMPTS = 3
 
 
-def build_orchestrator_agent() -> SequentialAgent:
-    investigate_and_verify_loop = LoopAgent(
-        name="investigate_and_verify_loop",
-        description="Pulls data, forecasts, investigates, drafts a report, and verifies it; "
-        "retries (bounded) on verification failure.",
-        max_iterations=MAX_VERIFICATION_ATTEMPTS,
-        sub_agents=[
-            build_analyst_agent(),
-            build_forecaster_agent(),
-            build_investigator_agent(),
-            build_reporter_agent(),
-            build_verifier_agent(),
-        ],
-    )
+def build_orchestrator_agent(enable_verifier: bool | None = None) -> SequentialAgent:
+    """Builds the orchestrator.
+
+    Args:
+        enable_verifier: include the verifier + retry loop (True), or run analyst ->
+            forecaster -> investigator -> reporter straight through with no verification/retry
+            (False). Defaults to settings.enable_verifier (env var ENABLE_VERIFIER) when None.
+            Takes an explicit override -- rather than only reading the environment -- so the
+            Phase 9 ablation can build both variants in one process without touching env vars.
+    """
+    if enable_verifier is None:
+        enable_verifier = settings.enable_verifier
+
+    if enable_verifier:
+        investigate_step = LoopAgent(
+            name="investigate_and_verify_loop",
+            description="Pulls data, forecasts, investigates, drafts a report, and verifies "
+            "it; retries (bounded) on verification failure.",
+            max_iterations=MAX_VERIFICATION_ATTEMPTS,
+            sub_agents=[
+                build_analyst_agent(),
+                build_forecaster_agent(),
+                build_investigator_agent(),
+                build_reporter_agent(),
+                build_verifier_agent(),
+            ],
+        )
+    else:
+        investigate_step = SequentialAgent(
+            name="investigate_and_report",
+            description="Pulls data, forecasts, investigates, and drafts a report -- no "
+            "verification or retry (ablation: multi-agent without verifier).",
+            sub_agents=[
+                build_analyst_agent(),
+                build_forecaster_agent(),
+                build_investigator_agent(),
+                build_reporter_agent(),
+            ],
+        )
+
     return SequentialAgent(
         name="orchestrator",
         description="Investigates a revenue question end-to-end: plans comparison periods, "
-        "then pulls/forecasts/investigates/reports/verifies in a bounded retry loop until the "
-        "verifier passes the draft or the retry budget is exhausted.",
+        "then pulls/forecasts/investigates/reports (optionally verifying and retrying until "
+        "the draft passes or the retry budget is exhausted).",
         sub_agents=[
             build_planner_agent(),
-            investigate_and_verify_loop,
+            investigate_step,
         ],
     )
 
