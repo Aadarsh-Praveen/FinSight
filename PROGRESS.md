@@ -540,3 +540,29 @@ Landed on:
   resilience. Explicitly gated behind user review of this schema/example draft before proceeding
   (`.venv/bin/ruff check .` and the fast test suite both still clean; no benchmark/scorer code
   written yet, per instruction).
+
+### 2026-07-02 — Phase 9 planning: three adjustments from user schema review
+1. **Repeated trials, not single runs.** User pointed out `test_retry_loop_catches_and_corrects_
+   fabricated_claim`'s observed 1-fail-3-pass rate is direct proof a single run per (config,
+   task) would be noise. `eval/ablation.py`'s design now requires every (config, task) pair run
+   min 3x / ideally 5x, with every reported metric a mean + spread (std dev or min-max), never a
+   point estimate. Verifier catch-rate variance is to be reported as a finding, not smoothed over.
+2. **`clean_attribution` reframed around confidence calibration**, not clean causation --
+   consistent with the Phase 9 planning finding that no month-pair in this dataset shows an
+   overwhelmingly dominant driver (best: ~48% share, 3.3x margin). Added `calibrated_confidence`
+   to the `required_behaviors` vocabulary: does the agent report the tier its own
+   reporter/verifier thresholds would justify (high >=60%, medium >=40%, low >=20%, else
+   insufficient), rather than overclaiming certainty or underclaiming into an unwarranted
+   refusal. Graded against a live-recomputed tier at eval time (via the same pre-flight
+   re-verification step), not a value stored in the JSONL. Updated `clean-001-outerwear-nov23`
+   accordingly (added `calibrated_confidence` to `required_behaviors`, added an
+   anti-overclaiming entry to `must_not_claim`).
+3. **Retargeted task mix for ~30 tasks:** `insufficient_evidence` 10-12, `adversarial` 4-5,
+   `ambiguous_scope` 4-5, `clean_attribution` (calibration-framed) ~9 rest -- weighted toward the
+   two task types that most directly test overclaiming, since that's the specific failure mode
+   the verifier exists to catch.
+- Updated `eval/README.md` with all three changes (task mix table, calibration reframe section,
+  new "Repeated trials" section). `eval/benchmark/finops_tasks.jsonl` still 6 draft tasks --
+  pasted the `ground_truth`/`required_behaviors` blocks of all 6 for user review before
+  authoring the remaining ~24, per instruction. Not yet built: same list as above, still
+  unstarted.
