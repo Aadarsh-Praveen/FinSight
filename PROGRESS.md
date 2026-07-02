@@ -8,7 +8,7 @@
 | Phase | Name | Status | Commit | Notes |
 |-------|------|--------|--------|-------|
 | 0 | Repo bootstrap & hygiene | ✅ Done | `120268a` | venv recreated w/ Python 3.11 |
-| 1 | Config & environment plumbing | ✅ Done | (pending) | pydantic Settings, fails loudly |
+| 1 | Config & environment plumbing | ✅ Done | `38cd311` | pydantic Settings, fails loudly |
 | 2 | Google Cloud + BigQuery readiness | ⬜ Not started | — | |
 | 3 | MCP Toolbox: read-only BigQuery tools | ⬜ Not started | — | |
 | 4 | First single agent (vertical slice) | ⬜ Not started | — | |
