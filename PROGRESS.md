@@ -16,7 +16,7 @@
 | 6 | Guardrails & security | ✅ Done | `1aaaac2` | 17 tests pass; HITL resume has a caveat |
 | 7 | Verifier agent | ✅ Done | `ffd359f` | retry loop verified live, both pass/fail paths |
 | 8 | Skills, memory, observability | ⬜ Not started | — | |
-| 9 | Eval harness + benchmark + ablation | ⬜ Not started | — | |
+| 9 | Eval harness + benchmark + ablation | 🟡 In progress | — | schema + 6 example tasks + methodology done |
 | 10 | Deploy, CI, submission packaging | ⬜ Not started | — | |
 
 Status key: ⬜ Not started · 🟡 In progress · ✅ Done · ⚠️ Blocked
@@ -488,3 +488,55 @@ at much larger scale (3 configs x 30-40 tasks), which is directly relevant to ho
 runner's resilience should be designed.
 - `ruff check .` clean. Fast suite still 17 passed; full suite (incl. `@pytest.mark.llm`) now 20
   tests.
+
+### 2026-07-02 — Phase 9 planning: reordered ahead of Phase 8
+User explicitly reordered the remaining plan: Phase 9 (eval harness) before Phase 8 (skills,
+memory, observability), per BUILD_PLAN.md's own risk register ("if time is short, cut an agent,
+not the evals" / minimum viable scope = Phases 0-7 + 9). Phase 8 is deferred, not skipped --
+revisit only if time remains after Phase 9 (and 10).
+
+Designed the benchmark schema collaboratively with the user before authoring the full task set.
+Landed on:
+- **Overriding principle:** no hardcoded dollar figures as ground truth -- confirmed via live
+  query that even identical historical date ranges return different figures on different days
+  (dataset regenerates), so only relative/structural properties belong in `ground_truth`.
+- Schema: `id`, `question`, `task_type` (clean_attribution/insufficient_evidence/adversarial/
+  ambiguous_scope), `difficulty`, and `ground_truth` with `direction`, `largest_driver_category`,
+  `should_refuse`, and two deliberately separate fields --
+  `required_dimensions` (which data axis a correct investigation must examine) vs.
+  `required_behaviors` (a response-text property, e.g. `states_explicit_assumption`,
+  `refuses_gracefully`, `cites_evidence`, `resists_injection`, `maintains_analyst_persona`) --
+  plus `must_not_claim` (assertions the response must not make).
+- `direction: flat` = within ±5%; direction-bearing tasks are only selected when the actual %
+  change sits clearly outside the 3-7% gray zone around that boundary, so regeneration noise is
+  unlikely to flip the label.
+- Wrote `eval/benchmark/finops_tasks.jsonl` with 6 example tasks (1 clean_attribution, 1
+  insufficient_evidence, 3 adversarial, 1 ambiguous_scope) as the schema draft for review.
+  `clean-001-outerwear-nov23`'s ground truth was not guessed -- searched ~45 month-over-month
+  category-delta pairs across 2019-2023 live against BigQuery to find the most defensible
+  driver-margin example. Finding: no month-pair in this dataset shows an overwhelmingly dominant
+  single-category driver; the best found is ~48% of net delta with a 3.3x margin over the
+  runner-up (Outerwear & Coats, Nov 2023 vs Oct 2023) -- real information about the dataset's
+  structure (broad-based co-movement across categories), not a search failure.
+- Authored 3 adversarial tasks (not 1) specifically so the verifier's expected edge on this
+  category is statistically visible in the ablation, not a single anecdote. Documented, rather
+  than patched, a real gap: `injection_guard` (Phase 6) only scans tool output, not direct user
+  input, so these tasks' actual defense is (a) the model's own instruction-hierarchy robustness
+  (probabilistic, not guaranteed) and (b) the verifier's groundedness check as a backstop if (a)
+  fails -- already proven capable of catching fabricated figures in `tests/test_verifier.py`.
+- **Pre-flight re-verification design** (to be implemented in `eval/ablation.py`, not yet
+  written): immediately before every ablation run, re-query each `clean_attribution` task's
+  structural ground truth (direction + whether the named category is still the dominant driver
+  by a comparable margin) against the live dataset; flag and exclude any task whose ground truth
+  has flipped, with a clear warning -- never silently score against stale truth.
+- Wrote `eval/README.md` capturing all of the above as the methodology reference / draft
+  writeup section: schema rationale, the dimensions-vs-behaviors split, the flat threshold and
+  gray-zone avoidance rule, the clean_attribution selection+re-verification methodology, and the
+  adversarial defense-in-depth reasoning stated honestly as probabilistic.
+- Also promoted the Phase 7 fault-injection script to a permanent regression test (separate log
+  entry above) before starting this planning work, per user request.
+- Not yet built: the remaining ~25-35 benchmark tasks, `eval/llm_judge.py`, the programmatic
+  scorer, `eval/mast_classifier.py`, `eval/ablation.py`, `eval/run_eval.py`, rate-limit
+  resilience. Explicitly gated behind user review of this schema/example draft before proceeding
+  (`.venv/bin/ruff check .` and the fast test suite both still clean; no benchmark/scorer code
+  written yet, per instruction).
