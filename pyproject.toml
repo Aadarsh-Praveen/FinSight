@@ -8,3 +8,6 @@ select = ["E", "F", "I"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "llm: makes real LLM calls (network + credentials required); excluded via `-m 'not llm'`.",
+]

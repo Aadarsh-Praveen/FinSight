@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from finsight.guardrails.injection_guard import scan_for_injection
+from finsight.guardrails.pii_redaction import EMAIL_PATTERN
+
 
 def compute_baseline_forecast(daily_revenues: list[float], projection_days: int) -> dict:
     """Projects expected total revenue for a period using a trailing-average baseline.
@@ -44,3 +47,22 @@ def propose_recommendation(recommendation: str, confidence: str) -> dict:
         A dict confirming the recommendation was approved and logged.
     """
     return {"status": "approved", "recommendation": recommendation, "confidence": confidence}
+
+
+def check_text_for_policy_violations(text: str) -> dict:
+    """Deterministically scans text for PII leakage and prompt-injection patterns.
+
+    Used by the verifier agent as a policy check on the draft report, rather than relying on
+    LLM judgment alone -- reuses the same regexes as the pii_redaction and injection_guard
+    guardrail callbacks (finsight/guardrails/), so the standard is identical.
+
+    Args:
+        text: The text to scan, e.g. the report's summary + root_cause + recommendation.
+
+    Returns:
+        A dict with pii_found (bool) and injection_found (bool).
+    """
+    return {
+        "pii_found": bool(EMAIL_PATTERN.search(text)),
+        "injection_found": scan_for_injection(text) is not None,
+    }

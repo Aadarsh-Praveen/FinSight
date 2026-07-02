@@ -14,7 +14,7 @@
 | 4 | First single agent (vertical slice) | ✅ Done | `60494ab` | adk run verified, grounded answers |
 | 5 | Full multi-agent workflow | ✅ Done | `0686aae` | SequentialAgent, structured hand-offs |
 | 6 | Guardrails & security | ✅ Done | `1aaaac2` | 17 tests pass; HITL resume has a caveat |
-| 7 | Verifier agent | ⬜ Not started | — | |
+| 7 | Verifier agent | ✅ Done | (pending) | retry loop verified live, both pass/fail paths |
 | 8 | Skills, memory, observability | ⬜ Not started | — | |
 | 9 | Eval harness + benchmark + ablation | ⬜ Not started | — | |
 | 10 | Deploy, CI, submission packaging | ⬜ Not started | — | |
@@ -345,3 +345,78 @@ _(Record any place the installed library API differed from the plan, and what wa
   `adk run`, discovered as untracked cruft after the live HITL test).
 - Next: Phase 7 (verifier agent — groundedness/sufficiency/policy critic + retry loop; this is
   also where the SequentialAgent-vs-branching-Workflow question from Phase 5 gets revisited).
+
+### 2026-07-02 — Phase 7
+- **Revisited the SequentialAgent/Workflow question from Phase 5:** discovered both
+  `SequentialAgent` and `LoopAgent` are marked `@deprecated` in the installed google-adk 2.3.0
+  ("will be removed in future versions, use Workflow instead"). Inspected `google.adk.Workflow`
+  (`google.adk.workflow`: `Node`/`Edge`/`START`/conditional dict-keyed routing, `FunctionNode`,
+  `JoinNode`) -- it's a genuinely different graph-builder API, not a drop-in rename. Given
+  `SequentialAgent`/`LoopAgent` are fully working and tested, and Phase 9 (eval harness) is
+  explicitly the higher-priority remaining work under the July 6 deadline, made the deliberate
+  call to keep the deprecated-but-functional primitives rather than migrate now. Documented as
+  known tech debt with the Workflow API surface noted above as the migration starting point, in
+  case there's time to revisit after Phase 9.
+- Added `VerifierResult` to `finsight/agents/schemas.py` (passed, groundedness_ok,
+  sufficiency_ok, policy_ok, issues, critique) and `finsight/agents/verifier.py`
+  (model=MODEL_VERIFIER, per BUILD_PLAN.md). Added
+  `finsight/tools/finops_tools.py::check_text_for_policy_violations`, a deterministic tool that
+  reuses the exact same regexes as the Phase 6 `pii_redaction`/`injection_guard` guardrails, so
+  the verifier's "policy" check isn't relying on LLM judgment alone for something a regex can
+  already catch reliably.
+- **Bug found and fixed: ADK's `exit_loop` tool silently breaks `output_schema` capture.**
+  Original design had the verifier call `google.adk.tools.exit_loop` on pass, per the
+  conventional LoopAgent-critic pattern. Live-tested and found `state["verification"]` was
+  correctly saved on the FAIL path but **never saved on the PASS path** -- `exit_loop` sets
+  `tool_context.actions.skip_summarization = True`, which (per `llm_agent.py`'s own comment)
+  suppresses the model's next turn, including the turn that would normally emit the
+  `output_schema` JSON. Root-caused this by reading `google/adk/agents/llm_agent.py`'s
+  `output_key`-saving logic directly rather than guessing. Fixed by removing `exit_loop`
+  entirely and adding an `after_agent_callback`
+  (`verifier.py::_escalate_when_verification_passed`) that runs *after* `output_key` has
+  already saved state, reads `verification.passed` deterministically in Python, and sets
+  `callback_context.actions.escalate = True`. Also discovered `escalate` alone doesn't
+  propagate as an event unless the callback also writes a state delta (per
+  `base_agent.py::_handle_after_agent_callback`), so the callback also sets
+  `state["verification_passed"] = True`. Logged as [[project-finsight-verifier]] in memory.
+- `finsight/agents/orchestrator.py` restructured: `SequentialAgent(planner,
+  LoopAgent(max_iterations=3, sub_agents=[analyst, forecaster, investigator, reporter,
+  verifier]))`. `planner` stays outside the loop -- a bad root-cause claim is a
+  reporter/investigator problem far more often than a bad date-range choice, so replanning
+  every retry would be wasted work (deviation from the plan's literal "loop back to
+  planner/analyst" wording -- loops back to analyst, not planner).
+  `reporter.py` instruction now reads an optional `{verification?}` critique from a prior
+  failed attempt and is told to fix exactly those issues.
+- `tests/test_verifier.py` (2 new tests, marked `@pytest.mark.llm` since they make real LLM
+  calls via `Runner` + `InMemorySessionService` with hand-seeded state -- registered the `llm`
+  marker in `pyproject.toml`): directly satisfies the checkpoint by injecting a report with a
+  wildly fabricated revenue figure ($1,000,000 vs the real $12,285.80 delta) and asserting the
+  verifier returns `passed=False`, `groundedness_ok=False`, and does not escalate; a second test
+  asserts a properly grounded report passes and does escalate. Both pass against the real
+  model. Full suite: 19 passed (17 fast + 2 llm-marked).
+- **Live-verified the full integrated loop**, not just the isolated verifier: ran the complete
+  orchestrator via `Runner.run_async` directly (bypassing the CLI). Discovered the reporter's
+  Phase 6 HITL gate (`propose_recommendation`, `require_confirmation=True`) genuinely pauses the
+  *entire* invocation at the framework level (the async generator just stops yielding, with
+  `long_running_tool_ids` set on the pending event) -- not just a CLI display quirk. Attempted
+  to resume properly within the same continuous process (reconstructing the
+  `adk_request_confirmation` FunctionResponse per the CLI's own resume code in
+  `google/adk/cli/cli.py`) and hit the **identical** `Tool 'propose_recommendation' not found`
+  error as Phase 6's cross-process test -- proving the Phase 6 hypothesis (fresh tool object
+  identity across processes) was **wrong**. Reproduced with the same `Runner`, same session
+  service, same `root_agent` object, just a second `run_async` call. Real root cause: ADK's
+  tool-confirmation resume doesn't correctly re-resolve the in-scope tool registry for a
+  confirmation raised several levels deep in a nested agent hierarchy
+  (`SequentialAgent > LoopAgent > LlmAgent`) -- it falls back to a shallower agent's tools.
+  Corrected the Phase 6 memory file with this finding.
+- To still get full live confirmation of the loop mechanics (not just the isolated verifier
+  unit test), ran a **diagnostic-only** orchestrator variant with a reporter that has no
+  confirmation-gated tool (scratchpad script, not committed). Full chain ran live: planner ->
+  analyst -> forecaster -> investigator -> reporter -> verifier, verifier returned
+  `passed: true` with all three checks true, and `escalate=True` on its final event correctly
+  stopped the `LoopAgent` after exactly one iteration (no retry needed, as expected for a
+  clean grounded report). This is real, non-mocked confirmation that the retry-loop machinery
+  works end-to-end, complementing the isolated fail-path test.
+- `ruff check .` clean; `pytest` 19 passed (2 of them `@pytest.mark.llm`, real network calls).
+- Next: Phase 8 (skills, memory, observability) -- per the risk register, this is one of the
+  first things to cut further if Phase 9 (eval harness, higher priority) needs the time.

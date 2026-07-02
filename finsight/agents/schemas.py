@@ -81,3 +81,21 @@ class FinOpsReport(BaseModel):
         "(the expected result on a fresh run -- this tool requires human approval before an "
         "action is considered approved), 'approved', or 'rejected'."
     )
+
+
+class VerifierResult(BaseModel):
+    passed: bool = Field(
+        description="True only if groundedness_ok, sufficiency_ok, and policy_ok are all true."
+    )
+    groundedness_ok: bool = Field(
+        description="False if any figure/claim in the report isn't traceable to state."
+    )
+    sufficiency_ok: bool = Field(
+        description="False if root_cause/confidence overclaims what the evidence supports."
+    )
+    policy_ok: bool = Field(description="False if the report leaks PII or violates read-only.")
+    issues: list[str] = Field(description="Specific problems found. Empty if passed.")
+    critique: str = Field(
+        description="Actionable feedback for the next attempt if failed, else a short "
+        "confirmation."
+    )
