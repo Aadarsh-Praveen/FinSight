@@ -8,7 +8,7 @@
 | Phase | Name | Status | Commit | Notes |
 |-------|------|--------|--------|-------|
 | 0 | Repo bootstrap & hygiene | ✅ Done | `120268a` | venv recreated w/ Python 3.11 |
-| 1 | Config & environment plumbing | ⬜ Not started | — | |
+| 1 | Config & environment plumbing | ✅ Done | (pending) | pydantic Settings, fails loudly |
 | 2 | Google Cloud + BigQuery readiness | ⬜ Not started | — | |
 | 3 | MCP Toolbox: read-only BigQuery tools | ⬜ Not started | — | |
 | 4 | First single agent (vertical slice) | ⬜ Not started | — | |
@@ -62,3 +62,21 @@ _(Record any place the installed library API differed from the plan, and what wa
   ADC authenticated; `.env` populated with real values; GitHub remote already linked
   (`github.com/Aadarsh-Praveen/FinSight`).
 - Next: Phase 1 (config loader) — should be quick since `.env` is already fully populated.
+
+### 2026-07-01 — Phase 1
+- Implemented `finsight/config.py`: a pydantic `Settings` model loaded from `.env` via
+  `python-dotenv`. Validates all required vars are present (fails with a clear `RuntimeError`
+  listing exactly which vars are missing) and cross-validates that `GOOGLE_API_KEY` is set when
+  `GOOGLE_GENAI_USE_VERTEXAI` is `FALSE`.
+- `python -m finsight.config` self-check prints resolved non-secret settings; `GOOGLE_API_KEY` is
+  shown as `<set>`/`<not set>` rather than echoing the value.
+- Verified the failure path by temporarily moving `.env` aside and re-running the self-check —
+  got the expected `RuntimeError` naming all 9 missing vars, exit code 1. Restored `.env`
+  immediately after.
+- Note: `python-dotenv`'s `load_dotenv()` (no `usecwd=True`) searches upward from the *calling
+  module's* location, not the shell's cwd — so `.env` at the repo root is found regardless of
+  where `finsight.config` is imported from. Worth remembering if `.env` is ever moved.
+- Re-ran `ruff check .` (clean) and `pytest` (0 tests, exit 5) — checkpoint still green.
+- Next: Phase 2 (Google Cloud + BigQuery readiness) — write `scripts/check_bigquery.py`;
+  connectivity/auth already manually verified by the user, so this is mostly about producing the
+  repo artifact.
