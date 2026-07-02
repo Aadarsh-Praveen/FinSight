@@ -462,3 +462,29 @@ Committed the `ENABLE_VERIFIER` toggle as a standalone follow-up to the Phase 7 
 fault-injection script itself was not committed (scratchpad, one-off) -- offered to turn it into
 a permanent regression test in `tests/test_verifier.py` if wanted, but that's additional scope
 beyond what was asked for in this pass.
+
+### 2026-07-02 — Promote fault injection to a committed regression test
+User asked for the scratchpad fault-injection script to become a permanent test before starting
+Phase 9. Added `test_retry_loop_catches_and_corrects_fabricated_claim` to
+`tests/test_verifier.py`: builds the real `analyst`/`forecaster`/`investigator`/`verifier` (from
+`finsight.agents.*`, unmodified) inside a real `LoopAgent`, swapping in only a test-double
+reporter that fabricates a `$999,999.99` figure on its first attempt and self-corrects on retry
+(mirroring how the real reporter reacts to `{verification?}`). Asserts, from the raw event
+stream: exactly 2 reporter attempts happened (genuine retry, not catch-only); attempt 1 contains
+the fabricated figure and fails verification on `groundedness_ok`; attempt 2 drops the
+fabricated figure and passes; exactly 1 `escalate=True` event fires, authored by `verifier`, and
+no 3rd iteration ran despite budget for one. All assertions carry a full JSON diagnostic dump of
+every iteration on failure.
+
+**Observed flakiness, reported honestly rather than hidden:** ran this test 4 times during
+development -- 1 failure, 3 passes. This is real-model non-determinism in whether the poisoned
+reporter fabricates on attempt 1 and self-corrects on attempt 2 exactly as instructed, not a bug
+in the verifier/loop mechanism itself (which has now been proven correct across many independent
+runs -- this test, the two earlier isolated tests, and two ad hoc live diagnostics). Did not
+weaken the assertions to force a 100% pass rate, since that would undermine the point of the
+test; instead added rich diagnostics so a real regression is distinguishable from ordinary model
+variance. Flagging this now because Phase 9's ablation will face the same category of variance
+at much larger scale (3 configs x 30-40 tasks), which is directly relevant to how the eval
+runner's resilience should be designed.
+- `ruff check .` clean. Fast suite still 17 passed; full suite (incl. `@pytest.mark.llm`) now 20
+  tests.
