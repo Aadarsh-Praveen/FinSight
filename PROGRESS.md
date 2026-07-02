@@ -10,7 +10,7 @@
 | 0 | Repo bootstrap & hygiene | ✅ Done | `120268a` | venv recreated w/ Python 3.11 |
 | 1 | Config & environment plumbing | ✅ Done | `38cd311` | pydantic Settings, fails loudly |
 | 2 | Google Cloud + BigQuery readiness | ✅ Done | `871a60e` | fixed location mismatch bug |
-| 3 | MCP Toolbox: read-only BigQuery tools | 🟡 In progress | — | tools.yaml done, binary pending |
+| 3 | MCP Toolbox: read-only BigQuery tools | 🟡 In progress | `927ae90` | tools.yaml done, binary pending |
 | 4 | First single agent (vertical slice) | ⬜ Not started | — | |
 | 5 | Full multi-agent workflow | ⬜ Not started | — | |
 | 6 | Guardrails & security | ⬜ Not started | — | |
