@@ -566,3 +566,49 @@ Landed on:
   pasted the `ground_truth`/`required_behaviors` blocks of all 6 for user review before
   authoring the remaining ~24, per instruction. Not yet built: same list as above, still
   unstarted.
+
+### 2026-07-02 — Full 30-task benchmark authored
+User approved the 6 draft tasks' ground truth (including the `adv-003` should_refuse=false
+pattern, asked to keep several tasks with that subtlety) and gave four scoring refinements
+before authoring the rest:
+1. Mixed deterministic + LLM-judge scoring: programmatic string/regex check for any
+   `must_not_claim` entry with a concrete fingerprint (e.g. adversarial tasks' literal injected
+   dollar figures), LLM judge reserved for genuinely semantic claims. Documented per-entry, not
+   per-task, decision in `eval/README.md`.
+2. `calibrated_confidence` operationally defined and to be passed verbatim to the judge
+   (parameterized by the task's live-recomputed share) rather than left for the judge to infer.
+3. `resists_injection` needs two different rubrics selected by each task's own `should_refuse`
+   value -- refuse-and-don't-comply vs. resist-the-framing-but-still-answer-correctly.
+4. Multi-trial scoring (min 3, ideally 5) applies to `must_not_claim`/`required_behaviors` at
+   the per-task, per-trial level, not just the top-line ablation config metrics.
+All four written into `eval/README.md`'s new "Scoring design" section.
+
+Authored the remaining 24 tasks via a broader live BigQuery search (not guessed): searched ~45
+month-pairs x multiple filters for `clean_attribution` candidates with margin >=2x over the
+runner-up and direction clearly outside the 3-7% gray zone; separately searched for a `down`
+direction and a `flat` direction example specifically, since the initial search skewed toward
+`up`. Two findings surfaced and got written into the methodology (not just used silently):
+- `share_of_total_delta_pct` must be computed the same way `investigator.py` computes it --
+  divided by the **net** delta, not the sum of categories' absolute deltas. An early candidate
+  showed 29% by the wrong metric vs. 54% by the right one -- ground truth must match the metric
+  being graded.
+- The share metric is mathematically meaningless for `flat`-direction periods (divides by a
+  near-zero net delta, producing 500%+ garbage values in cases checked). Handled by setting
+  `largest_driver_category: null` for the two flat tasks and redefining what
+  `calibrated_confidence` means for them: recognizing no category "drove" a change that, net,
+  didn't meaningfully happen -- not citing a nonsensical share for whichever category had the
+  largest individual swing.
+- Also found: every non-flat `clean_attribution` candidate's leading-category share landed in
+  the ~43-54% band across the whole search -- consistently "medium" tier, never "high" or "low".
+  Documented as a likely structural property of the dataset (offsetting category movements),
+  not a sampling gap -- most of these tasks are expected to have "medium" as the correct
+  calibrated answer.
+
+Final `eval/benchmark/finops_tasks.jsonl`: 30 tasks -- `insufficient_evidence` 11,
+`clean_attribution` 9 (7 medium + 2 hard/flat), `adversarial` 5 (3 should_refuse=true, 2
+should_refuse=false), `ambiguous_scope` 5. All IDs unique, schema-validated.
+- `ruff check .` clean, fast suite still 17 passed.
+- Next: minimal scorer (programmatic + `eval/llm_judge.py`) sufficient to run a 2-3 task sample
+  through the real orchestrator and show reports + judge verdicts side-by-side for user
+  validation, per instruction -- before building the full `eval/ablation.py`/
+  `eval/mast_classifier.py`/`eval/run_eval.py`.
