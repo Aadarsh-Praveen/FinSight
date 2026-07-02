@@ -16,13 +16,17 @@ truth (direction, still-leading driver, still-comparable margin) is re-queried a
 dataset. A task whose ground truth has flipped is excluded from scoring for this run, with a
 warning -- never silently scored against stale truth.
 
-Concurrency and task selection: CONCURRENCY=1 (fully serial). A concurrent run (3 workers) was
-tried first and found a real bug -- google-adk's Runner.run() spawns its own internal thread +
-event loop per call, and running 2-3 of these concurrently deadlocks them (confirmed via a direct
-A/B test: the exact same tasks that failed ~100% concurrently succeeded 100% run serially, with
-essentially zero actual 429s in the concurrent run's log despite the mass timeout -- so it's a
-threading bug, not a quota problem). Serial execution is much slower, so ABLATION_TASK_IDS trims
-the benchmark to ~20 tasks (from 30) to fit a ~3 hour run, deliberately keeping
+Concurrency and process isolation: each trial runs in its own fresh subprocess (see
+eval/_trial_worker.py), one at a time. This is the third iteration of the execution strategy --
+a 6-way and then 3-way thread pool both deadlocked outright (concurrent Runner.run() calls, each
+spawning their own internal thread + event loop, contend badly); dropping to a single reused
+worker thread avoided the deadlock in small tests but still failed catastrophically at scale
+(169/180 timed out on a real run), most likely from accumulated unclosed aiohttp sessions/
+connections across many calls sharing one process. A subprocess per trial gives full isolation
+at the cost of Python/import startup overhead per trial. See PROGRESS.md for the full trail.
+
+Task selection: subprocess-per-trial plus fully serial execution is slow, so ABLATION_TASK_IDS
+trims the benchmark to ~20 tasks (from 30) to fit a practical runtime, deliberately keeping
 insufficient_evidence and adversarial (the two categories that most directly test the verifier's
 actual job) nearly intact and trimming clean_attribution/ambiguous_scope, which have more
 redundant examples. See PROGRESS.md for the exact kept/cut list and rationale.
@@ -36,9 +40,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import statistics
+import subprocess
+import sys
 import time
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
 
@@ -382,7 +388,18 @@ def run_all_trials(
     trials_per_task: int = TRIALS_PER_TASK,
     incremental_path: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Runs every (config, task, trial) job.
+    """Runs every (config, task, trial) job, each in its own fresh subprocess.
+
+    History of why this isn't a thread pool (see PROGRESS.md and
+    project_finsight_adk_thread_hang_bug.md for the full trail): a 6-way and then 3-way thread
+    pool both deadlocked (concurrent Runner.run() calls, each spawning their own internal thread
+    + event loop, contend badly). Dropping to CONCURRENCY=1 (a single reused worker thread) fixed
+    the deadlock in small tests but still failed catastrophically at scale (169/180 timed out on
+    a real run) -- most likely accumulated unclosed aiohttp sessions/connections across many
+    calls reusing the same thread/process (recurring "Unclosed client session" warnings have
+    shown up throughout this project). A subprocess per trial (see eval/_trial_worker.py) gives
+    every trial a fully fresh interpreter and connection state, eliminating that accumulation
+    entirely, at the cost of Python/import startup overhead per trial (a few seconds).
 
     If incremental_path is given, it's opened fresh (truncated) and each result is appended as
     one JSON line and flushed to disk immediately after that trial completes -- so a crash
@@ -396,7 +413,7 @@ def run_all_trials(
         for trial_idx in range(trials_per_task)
     ]
     print(f"[ablation] {len(jobs)} total trials across {len(CONFIGS)} configs x {len(tasks)} "
-          f"tasks x {trials_per_task} trials")
+          f"tasks x {trials_per_task} trials (each in its own subprocess)")
 
     results: list[dict[str, Any]] = []
     incremental_file = None
@@ -409,87 +426,85 @@ def run_all_trials(
             incremental_file.write(json.dumps(result) + "\n")
             incremental_file.flush()
 
-    # Known issue, worked around here rather than in google-adk: when Runner.run() (the sync
-    # wrapper) hits an unhandled 429 from Vertex AI, the exception occurs inside ADK's own
-    # internal background thread (runners.py::_asyncio_thread_main), not in the thread that
-    # called run(). It never propagates as a catchable Python exception here, so with_retry
-    # never even sees it -- the calling worker thread just blocks forever on the now-dead
-    # generator. Observed directly: a real ablation run stalled at 93/261 trials with 5 "Exception
-    # in thread" messages in the log and zero further progress for 20+ minutes. Can't fix ADK's
-    # internal thread from here, so instead: poll with a timeout and give up on any individual
-    # trial that's been pending too long, rather than letting one dead worker hang the whole run.
-    # The abandoned worker thread leaks as a zombie for the rest of the process's life (harmless,
-    # just wasted memory) but no longer blocks progress. Also confirmed separately that running
-    # multiple Runner.run() calls CONCURRENTLY (not just the 429 case) can deadlock outright --
-    # see the module docstring -- which is why CONCURRENCY defaults to 1 now; this timeout
-    # machinery is kept as a safety net regardless.
+    repo_root = Path(__file__).parent.parent
     start = time.time()
     total = len(jobs)
-    pool = ThreadPoolExecutor(max_workers=CONCURRENCY)
-    futures = {
-        pool.submit(run_single_trial, config_name, task, trial_idx): (
+
+    for i, (config_name, task, trial_idx) in enumerate(jobs, 1):
+        stdin_payload = json.dumps({"_live_share_pct": task.get("_live_share_pct")})
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(repo_root)
+        env["PYTHONUNBUFFERED"] = "1"
+        cmd = [
+            sys.executable,
+            "-m",
+            "eval._trial_worker",
             config_name,
             task["id"],
-            trial_idx,
-            time.time(),
-        )
-        for config_name, task, trial_idx in jobs
-    }
-    pending = set(futures.keys())
-
-    while pending:
-        done, pending = wait(pending, timeout=15, return_when=FIRST_COMPLETED)
-        for future in done:
-            config_name, task_id, trial_idx, _submit_time = futures[future]
-            try:
-                result = future.result()
-            except Exception as exc:  # noqa: BLE001
+            str(trial_idx),
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=stdin_payload,
+                capture_output=True,
+                text=True,
+                timeout=PER_TRIAL_TIMEOUT_SECONDS,
+                cwd=str(repo_root),
+                env=env,
+            )
+            if proc.returncode != 0:
                 result = {
                     "config": config_name,
-                    "task_id": task_id,
+                    "task_id": task["id"],
                     "trial": trial_idx,
-                    "error": f"trial crashed: {exc}",
+                    "error": f"subprocess exited {proc.returncode}: {proc.stderr[-2000:]}",
                     "report": None,
                     "judge_verdict": None,
-                    "programmatic": {"error": str(exc)},
+                    "programmatic": {"error": "subprocess_failed"},
                 }
-            _record(result)
-            elapsed = time.time() - start
-            print(
-                f"[ablation] {len(results)}/{total} done ({elapsed:.0f}s elapsed): "
-                f"{config_name}:{task_id}:trial{trial_idx}"
-            )
-
-        now = time.time()
-        still_pending = set()
-        for future in pending:
-            config_name, task_id, trial_idx, submit_time = futures[future]
-            if now - submit_time > PER_TRIAL_TIMEOUT_SECONDS:
-                print(
-                    f"[ablation] TIMEOUT giving up on {config_name}:{task_id}:trial{trial_idx} "
-                    f"after {PER_TRIAL_TIMEOUT_SECONDS:.0f}s (likely a hung ADK internal thread)"
-                )
-                _record(
-                    {
+            else:
+                lines = [line for line in proc.stdout.strip().splitlines() if line.strip()]
+                result = json.loads(lines[-1]) if lines else None
+                if result is None:
+                    result = {
                         "config": config_name,
-                        "task_id": task_id,
+                        "task_id": task["id"],
                         "trial": trial_idx,
-                        "error": f"trial timed out after {PER_TRIAL_TIMEOUT_SECONDS:.0f}s",
+                        "error": "subprocess produced no output",
                         "report": None,
                         "judge_verdict": None,
-                        "programmatic": {"error": "timeout"},
+                        "programmatic": {"error": "no_output"},
                     }
-                )
-                elapsed = time.time() - start
-                print(
-                    f"[ablation] {len(results)}/{total} done ({elapsed:.0f}s elapsed, TIMEOUT): "
-                    f"{config_name}:{task_id}:trial{trial_idx}"
-                )
-            else:
-                still_pending.add(future)
-        pending = still_pending
+        except subprocess.TimeoutExpired:
+            result = {
+                "config": config_name,
+                "task_id": task["id"],
+                "trial": trial_idx,
+                "error": f"subprocess timed out after {PER_TRIAL_TIMEOUT_SECONDS:.0f}s",
+                "report": None,
+                "judge_verdict": None,
+                "programmatic": {"error": "timeout"},
+            }
+        except Exception as exc:  # noqa: BLE001
+            result = {
+                "config": config_name,
+                "task_id": task["id"],
+                "trial": trial_idx,
+                "error": f"subprocess dispatch failed: {exc}",
+                "report": None,
+                "judge_verdict": None,
+                "programmatic": {"error": str(exc)},
+            }
 
-    pool.shutdown(wait=False)
+        _record(result)
+        elapsed = time.time() - start
+        status = "" if not result.get("error") else f" ({result['error'][:60]})"
+        print(
+            f"[ablation] {i}/{total} done ({elapsed:.0f}s elapsed): "
+            f"{config_name}:{task['id']}:trial{trial_idx}{status}"
+        )
+
     if incremental_file is not None:
         incremental_file.close()
     return results
@@ -623,8 +638,6 @@ def aggregate_and_report(
 
 
 def main() -> None:
-    import sys
-
     RESULTS_DIR.mkdir(exist_ok=True)
     incremental_path = RESULTS_DIR / "ablation_trials.jsonl"
     final_path = RESULTS_DIR / "ablation_raw_trials.json"

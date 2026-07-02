@@ -740,3 +740,35 @@ run's progress.
 
 Relaunched: `CONCURRENCY=1`, 20 tasks x 3 configs x 3 trials = 180 total trials, running
 unattended.
+
+### 2026-07-02 — Third infra failure (worse), fixed with subprocess-per-trial isolation
+The `CONCURRENCY=1` serial run finished (all 180 trials accounted for in the incremental JSONL,
+confirming the incremental-write mechanism itself works correctly), but **169/180 (94%)
+timed out** -- dramatically worse than the concurrent runs, including 100% of both multi-agent
+configs. Investigated rather than assumed: this ruled out both prior hypotheses --
+`ThreadPoolExecutor(max_workers=1)` still reuses a single worker thread across all 180 calls to
+`Runner.run()`, and something accumulates across that many repeated calls in one thread/process
+until most calls hang. Most likely culprit: unclosed aiohttp sessions/connections -- "Unclosed
+client session" / "Unclosed connector" warnings have appeared intermittently in this project's
+tool output all session (going back to Phase 4), suggesting `Runner`/`google-genai` don't fully
+clean up per-call HTTP client state, and it silently degrades a long-lived process.
+
+Fix: `eval/_trial_worker.py`, a standalone script that runs exactly one trial and prints the
+result as JSON on stdout's last line. `eval/ablation.py::run_all_trials` now calls
+`subprocess.run([sys.executable, "-m", "eval._trial_worker", ...], timeout=...)` per trial
+instead of any thread pool -- full process isolation (fresh interpreter, fresh connections,
+guaranteed cleanup on exit) at the cost of Python/import startup overhead per trial (adds
+roughly 30-100+s per multi-agent trial vs. the in-process timings measured earlier). Verified
+with a 6-trial smoke test (2 tasks x 3 configs x 1 trial): **6/6 succeeded, zero errors** --
+first fully clean result across four attempts at this problem.
+
+Revised time estimate given subprocess overhead: ~5.5-6 hours for the full 180-trial trimmed
+run (up from the ~3.5-4hr serial-in-process estimate) -- accepted as the cost of reliability;
+94% garbage data is not an acceptable tradeoff for saving a couple of hours.
+
+Also: the previous serial run's *process* was reported "killed" by the harness partway through
+monitoring, even though it had actually run to full completion by the time this was noticed
+(all 180 trials were in the incremental JSONL) -- most likely the tool call's own timeout
+parameter being enforced as a hard cap regardless of `run_in_background`. For this launch,
+fully detached the process from tool-level supervision (`nohup ... & disown`) so a multi-hour
+run can't be prematurely killed by anything except an actual crash.
