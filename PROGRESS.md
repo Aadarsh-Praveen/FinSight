@@ -9,7 +9,7 @@
 |-------|------|--------|--------|-------|
 | 0 | Repo bootstrap & hygiene | ✅ Done | `120268a` | venv recreated w/ Python 3.11 |
 | 1 | Config & environment plumbing | ✅ Done | `38cd311` | pydantic Settings, fails loudly |
-| 2 | Google Cloud + BigQuery readiness | ⬜ Not started | — | |
+| 2 | Google Cloud + BigQuery readiness | ✅ Done | (pending) | fixed location mismatch bug |
 | 3 | MCP Toolbox: read-only BigQuery tools | ⬜ Not started | — | |
 | 4 | First single agent (vertical slice) | ⬜ Not started | — | |
 | 5 | Full multi-agent workflow | ⬜ Not started | — | |
@@ -80,3 +80,22 @@ _(Record any place the installed library API differed from the plan, and what wa
 - Next: Phase 2 (Google Cloud + BigQuery readiness) — write `scripts/check_bigquery.py`;
   connectivity/auth already manually verified by the user, so this is mostly about producing the
   repo artifact.
+
+### 2026-07-01 — Phase 2
+- Wrote `scripts/check_bigquery.py`: standalone script (loads `.env` directly, doesn't import
+  `finsight.config`, to avoid sys.path issues when run as a plain script) that runs
+  `SELECT COUNT(*)` against `bigquery-public-data.thelook_ecommerce.orders`.
+- First run hit `403 Access Denied` — root cause was **not** a real permission problem: the
+  `bigquery.Client` was constructed with `location=GOOGLE_CLOUD_LOCATION` (`us-central1`), but
+  `bigquery-public-data` datasets live in the `US` multi-region. Forcing a mismatched job location
+  produces a misleading access-denied error instead of a location error. Fixed by not passing
+  `location` to the client and letting BigQuery auto-detect it per query; added a comment
+  explaining why, since it's a non-obvious gotcha.
+- Verified: `python scripts/check_bigquery.py` prints `... orders row count: 124838`, exit 0.
+  `ruff check .` clean, `pytest` 0 tests (exit 5).
+- **Deviation to remember:** `GOOGLE_CLOUD_LOCATION` should only be used for Cloud Run /
+  agent-execution region, not forced onto BigQuery jobs that touch public multi-region datasets.
+  Keep this in mind when the MCP Toolbox `tools.yaml` `bigquery` source is configured in Phase 3
+  — don't hardcode `us-central1` as the dataset location there either.
+- Next: Phase 3 (MCP Toolbox: read-only BigQuery tools) — write `mcp-toolbox/tools.yaml` and
+  README; human step to download the toolbox binary for macOS arm64.
