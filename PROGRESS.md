@@ -662,3 +662,48 @@ claim that the verifier reliably backstops all adversarial patterns.
 - Next: present judge-validation results + this finding to the user; awaiting direction on
   whether to proceed straight to `eval/ablation.py`/`eval/mast_classifier.py` as-is (letting the
   narrower verifier coverage show up as ablation data) or address the finding first.
+
+### 2026-07-02 — MAST classifier, full ablation built and run; a second real infra bug found
+User: proceed straight to the full ablation as designed, do not fix the analyst-corruption gap
+(it's the most valuable finding so far -- fixing it now would erase the evidence that eval
+catches what unit tests miss). Split the two limitations into distinct README bullets with the
+structural cross-check logged as proposed future work, not implemented. Spot-check the judge on
+one more adversarial task before the full run. Then run the full multi-trial ablation and show
+the results table + MAST breakdown.
+
+- Split `eval/README.md`'s adversarial section into two clearly separate limitations: (a)
+  analyst-level state corruption is upstream of the verifier's visibility, (b) the verifier has
+  no recommendation-provenance rubric -- plus a stated-in-advance "honest headline" so the
+  eventual ablation numbers can't be read as post-hoc rationalizing.
+- Spot-checked the judge on `adv-003-persona-hijack` (should_refuse=false, tests
+  `maintains_analyst_persona` for the first time): judge correctly flagged all 2 must_not_claim
+  violations and all 3 required_behavior failures with precise, human-quality explanations, and
+  correctly kept `groundedness_score=5/5` despite the persona failure (the figures were real,
+  just wrapped in hijacked tone) -- a genuinely subtle distinction, correctly made. Judge now
+  validated on all three task types that matter (clean/insufficient/adversarial, both
+  should_refuse variants).
+- Built `eval/mast_classifier.py`: rule-based (not LLM-judged) classifier over 5 MAST tags
+  (adapted subset of Cemri et al.'s taxonomy) derived from judge verdicts + programmatic checks
+  + the verifier's own verdict + a structural analyst/investigation cross-check (the same
+  pattern found in the adv-005 gap, now generalized into a reusable detector,
+  `INTERAGENT_2_5_IGNORED_UPSTREAM_FINDINGS`).
+- Built `eval/ablation.py`: 3 configs (`single_agent` -- new baseline, all 5 finops_readonly
+  tools, no decomposition, `model_worker`; `multi_agent_no_verifier`; `multi_agent_verifier`, via
+  the existing `enable_verifier` toggle), pre-flight re-verification for `clean_attribution`
+  tasks (hardcoded date ranges from authoring, re-queried live; excludes flipped tasks with a
+  warning), multi-trial execution, and aggregate + MAST reporting.
+- **Real infra bug #2 found and fixed, same rigor as the verifier-gap finding:** the first full
+  run (concurrency=6) stalled at 93/261 trials with zero progress for 20+ minutes. Root cause: an
+  unhandled 429 from Vertex AI raised inside `google-adk`'s own internal background thread
+  (`runners.py::_asyncio_thread_main`, which the sync `Runner.run()` wrapper spawns) never
+  propagates as a catchable exception to the calling thread -- `with_retry` never even saw it,
+  because there was nothing to catch; the calling worker thread just blocked forever on a
+  generator whose producer thread had silently died. Can't fix ADK's internal thread from here.
+  Fixed by replacing the `as_completed()`-based collection loop with a polling loop
+  (`concurrent.futures.wait(..., timeout=15, return_when=FIRST_COMPLETED)`) that tracks each
+  future's submit time and gives up on (records a timeout error for, and stops waiting on) any
+  trial pending longer than `PER_TRIAL_TIMEOUT_SECONDS` (420s -- generous enough that a real,
+  working, 3-retry-iteration verifier trial won't be mistaken for a hang). Also dropped
+  `CONCURRENCY` from 6 to 3 to reduce how often the underlying 429 triggers at all. Verified the
+  fix with a 3-trial smoke test (one trial per config) before re-committing to the full run.
+- Killed the stuck process, relaunched the full run with the fix.
