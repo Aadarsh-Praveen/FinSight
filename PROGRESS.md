@@ -11,7 +11,7 @@
 | 1 | Config & environment plumbing | ✅ Done | `38cd311` | pydantic Settings, fails loudly |
 | 2 | Google Cloud + BigQuery readiness | ✅ Done | `871a60e` | fixed location mismatch bug |
 | 3 | MCP Toolbox: read-only BigQuery tools | ✅ Done | `927ae90` | server verified live via MCP calls |
-| 4 | First single agent (vertical slice) | ⬜ Not started | — | |
+| 4 | First single agent (vertical slice) | ✅ Done | (pending) | adk run verified, grounded answers |
 | 5 | Full multi-agent workflow | ⬜ Not started | — | |
 | 6 | Guardrails & security | ⬜ Not started | — | |
 | 7 | Verifier agent | ⬜ Not started | — | |
@@ -167,3 +167,34 @@ _(Record any place the installed library API differed from the plan, and what wa
   safety signal in Phase 6 guardrails — enforce read-only via our own `sql_readonly` guardrail
   and the fixed SQL in `tools.yaml`, as already planned.
 - Phase 3 checkpoint fully met. Next: Phase 4 (first single agent — analyst vertical slice).
+
+### 2026-07-02 — Phase 4
+- Inspected the installed `google-adk` 2.3.0 API directly (per BUILD_PLAN.md's "trust the
+  installed library" guidance) rather than assuming: `google.adk.Agent`/`LlmAgent` is a pydantic
+  model with `name`, `model`, `instruction`, `tools` (accepts bare `Callable`s, not just
+  `BaseTool`), and `before_tool_callback`/`after_tool_callback` hooks (useful later for Phase 6
+  guardrails). `adk run AGENT_DIR` / `adk web AGENTS_DIR` both dynamically import `agent.py`
+  inside the target folder and read its `root_agent`, matching BUILD_PLAN.md's assumed layout.
+- Confirmed `toolbox_core.ToolboxSyncClient.load_toolset()` returns `ToolboxSyncTool` objects
+  that are directly callable with a real `__signature__` (per-tool, reflecting each tool's actual
+  params) -- these drop straight into ADK's `tools=[...]` list with no wrapping needed. Verified
+  this live against the running toolbox server before wiring it into the agent.
+- Implemented `finsight/tools/mcp_bigquery.py` (process-wide lazy `ToolboxSyncClient` singleton,
+  since the client's tools call back through its background event loop and must stay alive) and
+  `finsight/agents/analyst.py` (single `Agent` with `model=MODEL_WORKER`, the 4
+  `finops_readonly` tools, and an instruction that requires tool-grounded answers). Set
+  `finsight/agent.py`'s `root_agent` to the analyst per the plan.
+- Checkpoint verified with real runs, not just import checks:
+  - `adk run finsight "What was total revenue and order count from 2023-01-01 to
+    2023-01-31?"` -> agent called `get_revenue_by_period` and answered "91939.83" / "1083",
+    which is exactly what Phase 3's live BigQuery check returned for the same range today --
+    genuinely grounded, not hallucinated.
+  - The plan's own example question ("What were total sales last month by category?") initially
+    made the agent ask a clarifying question about the ambiguous date range instead of
+    answering -- reasonable, but stalls a single-turn CLI/demo flow. Tightened the instruction to
+    require picking a concrete assumed range and stating it, rather than asking. Re-ran: agent
+    assumed April 2023, stated that upfront, and returned a full grounded category breakdown via
+    `get_orders_by_category`.
+- `ruff check .` clean, `pytest` 0 tests (exit 5).
+- Next: Phase 5 (full multi-agent workflow — planner/analyst/forecaster/investigator/reporter
+  composed via an ADK `Workflow`/graph, orchestrator becomes `root_agent`).
