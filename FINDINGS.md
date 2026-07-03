@@ -177,8 +177,9 @@ but doesn't close the gap back to single-agent's baseline.
   configs (`eval/ablation.py::_driver_named_as_cause`), so the comparison in finding 1's
   clean_attribution table is scored by one instrument across all three arms, not two different
   ones. Validated by rerunning `single_agent` alone: 0% → 83.3%, now consistent with the LLM
-  judge's independent read of the same report text (4.83-4.92/5 reasoning/groundedness across both
-  the broken and fixed scoring — the report quality never changed, only the scorer).
+  judge's independent read of the same report text (reasoning_quality 4.83-4.92/5, groundedness
+  4.83-5.00/5, across the broken-scoring run and the fixed-scoring rerun respectively — the report
+  quality never changed, only the scorer).
 - **Strict-vs-behavioral dual scoring**, introduced specifically to keep `adv-002` (finding 4) from
   being reported at the same severity as `adv-003` (finding 3) when the underlying failure modes
   are qualitatively different — one is a rubric-strictness artifact partially masking real
@@ -198,17 +199,40 @@ responses elsewhere:
 - **`single_agent`: 2/12 misses**, both "high" confidence stated on medium-tier tasks
   (`clean-011-outerwear-jun20` trial0, `clean-012-outerwear-mar22` trial1) — genuine overclaiming,
   not a scoring artifact (confirmed by reading the judge's explanation for each).
-- **`multi_agent_no_verifier`: 0/12 misses.** **`multi_agent_verifier`: 0/12 misses** (one report
-  stated "high" on a nominally-medium-tier task, `clean-012` trial2 — but the judge correctly
-  credited it, because that trial's own investigator tool call independently recomputed the live
-  share at 68.78% for that run, crossing the 60% "high" threshold; the rubric is graded against the
-  live per-trial recompute, not the static tier the task was authored against, and it adapted
-  correctly).
+- **`multi_agent_no_verifier`: 0/12 misses, tight agreement** -- all 3 trials of every task
+  compute a `share_of_total_delta_pct` within ~0.01 of each other (e.g. `clean-012`: 46.667,
+  46.667, 46.667). **`multi_agent_verifier`: 0/12 *judge* misses, but 2 real computation
+  outliers** -- `clean-012` trial2 reports "high" on a nominally-medium-tier task and the judge
+  credits it as calibrated, because that trial's investigator independently computed a share of
+  68.78% (vs. 46.67% in the other 5 trials of that task, including 2 in this same config);
+  `clean-011` trial0 similarly computed 46.11% vs. its 5 siblings' ~52.93% (didn't cross a tier
+  boundary, so no visible scoring effect, but the same instability). Both outliers are isolated
+  to `multi_agent_verifier` -- zero comparable outliers in `multi_agent_no_verifier`'s 12 trials --
+  which points to the retry loop, not the dataset, as the source: a plausible mechanism is the
+  investigator being re-invoked with different context across verifier retry iterations and
+  recomputing a different number, not the underlying data actually changing within the run.
+
+**Correction (checked, not assumed): this is a self-consistency check, not proof the scoring is
+drift-robust by design.** The rubric's `share_pct` input for multi-agent configs is genuinely
+computed fresh by that trial's own investigator tool call (`finsight/agents/investigator.py`
+computes `share_of_total_delta_pct` live every run) -- that architectural property is real, not
+coincidental. But the `clean-012` trial2 case is *not* good evidence of "the rubric correctly
+adapting to live dataset drift," because 5 of the task's other 6 multi-agent trials, executed
+minutes apart in the same live-data window, agree tightly at ~46.67% -- a jump to 68.78% in one
+trial is far more likely a computation inconsistency in that trial's investigator than the dataset
+itself moving and reverting. The calibration judge only checks *self-consistency* -- does the
+reporter's stated confidence match whatever the investigator reported that trial -- it does not
+independently re-verify the investigator's share is itself correct. A wrong investigator
+computation that the reporter faithfully reflects will still score as "correctly calibrated."
+`single_agent`'s share, by contrast, is computed once per task at pre-flight time and reused
+across all 3 of that task's trials (see `eval/ablation.py::preflight_reverify`) -- coarser-grained
+than multi-agent's per-trial recompute, but for the same reason immune to this particular
+retry-induced instability.
 
 **Why it matters:** a rubric that never fails anything is unfalsifiable and a rubric that fails
-correct answers is broken. This one did both jobs on real data in the same run — caught 2 genuine
-misses in `single_agent`, and correctly handled a live mid-run tier shift in `multi_agent_verifier`
-without a false positive. That the only misses observed were in `single_agent` is itself consistent
-with finding 1: the multi-agent configs' dedicated investigator computing share via its own tool
-call, independent of the reporter's prose, is a plausible mechanism for why calibration held better
-there too — not just driver-naming accuracy.
+correct answers is broken -- this one did both jobs on real data, catching 2 genuine misses in
+`single_agent`. But the `multi_agent_verifier` outliers are a genuine, newly-found open question
+for the writeup, not a strength: retries may be introducing measurement noise into the very state
+(`investigation.share_of_total_delta_pct`) the calibration rubric depends on, which the current
+harness has no independent check for. Worth flagging as a methodology limitation and future-work
+item, not glossing over.
