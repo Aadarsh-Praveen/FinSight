@@ -178,6 +178,13 @@ CLEAN_ATTRIBUTION_PERIODS: dict[str, tuple[str, str, str, str]] = {
     "clean-007-flat-blazers-mar22": ("2022-03-01", "2022-03-31", "2022-02-01", "2022-02-28"),
     "clean-008-outerwear-aug23": ("2023-08-01", "2023-08-31", "2023-07-01", "2023-07-31"),
     "clean-009-suits-down-apr21": ("2021-04-01", "2021-04-30", "2021-03-01", "2021-03-31"),
+    # Added 2026-07-03 after all 5 originally-selected clean_attribution tasks above were
+    # pre-flight-excluded in the full run (dataset regenerated overnight). Re-searched fresh
+    # against the then-current dataset state -- see PROGRESS.md for the search + verification.
+    "clean-010-suits-dec19-high": ("2019-12-01", "2019-12-31", "2019-11-01", "2019-11-30"),
+    "clean-011-outerwear-jun20": ("2020-06-01", "2020-06-30", "2020-05-01", "2020-05-31"),
+    "clean-012-outerwear-mar22": ("2022-03-01", "2022-03-31", "2022-02-01", "2022-02-28"),
+    "clean-013-outerwear-dec20-high": ("2020-12-01", "2020-12-31", "2020-11-01", "2020-11-30"),
 }
 
 
@@ -638,16 +645,35 @@ def aggregate_and_report(
 
 
 def main() -> None:
+    """CLI:
+    python eval/ablation.py                          # the full trimmed ABLATION_TASK_IDS run
+    python eval/ablation.py --report-only             # recover a report from the incremental file
+    python eval/ablation.py --task-ids id1,id2,...    # run a custom task subset instead
+        (writes to ablation_trials_custom.jsonl / ablation_raw_trials_custom.json so it never
+        clobbers the main run's results)
+    """
     RESULTS_DIR.mkdir(exist_ok=True)
-    incremental_path = RESULTS_DIR / "ablation_trials.jsonl"
-    final_path = RESULTS_DIR / "ablation_raw_trials.json"
+
+    custom_ids = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--task-ids="):
+            custom_ids = arg.split("=", 1)[1].split(",")
+
+    if custom_ids:
+        incremental_path = RESULTS_DIR / "ablation_trials_custom.jsonl"
+        final_path = RESULTS_DIR / "ablation_raw_trials_custom.json"
+        task_ids = custom_ids
+    else:
+        incremental_path = RESULTS_DIR / "ablation_trials.jsonl"
+        final_path = RESULTS_DIR / "ablation_raw_trials.json"
+        task_ids = ABLATION_TASK_IDS
 
     all_tasks = load_tasks()
     tasks_by_id = {t["id"]: t for t in all_tasks}
-    selected_tasks = [tasks_by_id[tid] for tid in ABLATION_TASK_IDS if tid in tasks_by_id]
-    missing = set(ABLATION_TASK_IDS) - set(tasks_by_id)
+    selected_tasks = [tasks_by_id[tid] for tid in task_ids if tid in tasks_by_id]
+    missing = set(task_ids) - set(tasks_by_id)
     if missing:
-        raise SystemExit(f"ABLATION_TASK_IDS references unknown task IDs: {sorted(missing)}")
+        raise SystemExit(f"Unknown task IDs: {sorted(missing)}")
 
     if len(sys.argv) > 1 and sys.argv[1] == "--report-only":
         # Recovery path: read whatever's in the incremental file (works even if the run
