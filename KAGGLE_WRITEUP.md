@@ -182,7 +182,9 @@ FinOps-style agent:
 
 ## 7. Links
 
-- GitHub repo: `[public repo URL — TODO]`
+- GitHub repo: https://github.com/Aadarsh-Praveen/FinSight (public — **not yet pushed past the
+  initial commit as of this draft**; all Phase 0-9 work needs an explicit `git push` before this
+  link shows anything real)
 - Cloud Run demo: `[not yet deployed — Phase 10 not started; BUILD_PLAN's risk register explicitly
   treats this as a cuttable stretch behind evals]`
 - Demo video: `[not yet recorded]`
