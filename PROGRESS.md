@@ -772,3 +772,22 @@ monitoring, even though it had actually run to full completion by the time this 
 parameter being enforced as a hard cap regardless of `run_in_background`. For this launch,
 fully detached the process from tool-level supervision (`nohup ... & disown`) so a multi-hour
 run can't be prematurely killed by anything except an actual crash.
+
+### 2026-07-03 — Not a code bug: the Mac went to sleep. Relaunched with `caffeinate`
+The subprocess-isolated run (previous entry) appeared to hang: trial #15
+(`single_agent:insuff-006-profit-margin:trial2`) showed as running for **4h28m** with the parent
+process at only 1.13s cumulative CPU time, and `subprocess.run(timeout=420)` didn't fire until
+~16443s (4.5 hours) instead of 420s. Investigated before assuming a fifth code bug: confirmed via
+`pmset -g log` that the machine woke from **Deep Idle sleep** at the exact moment monitoring
+resumed ("DarkWake to FullWake from Deep Idle... due to HID Activity"). The whole machine --
+including the scheduled monitoring wakeup, the ablation process, and its OS-level timeout
+tracking -- was frozen for hours, not hung. Once awake, the deferred timeout fired correctly and
+the run resumed normally (2 more trials completed quickly right after). This is a genuine,
+mundane environmental gotcha for a multi-hour unattended run on a laptop, distinct from the three
+real execution bugs already found and fixed (concurrent deadlock, single-thread degradation --
+both fixed by subprocess-per-trial isolation). Killed the stale parent/orphaned child, relaunched
+wrapped in `caffeinate -i` (prevents idle system sleep) via `nohup caffeinate -i env ...
+python eval/ablation.py > log 2>&1 & disown`. Accepted losing the 17 trials already completed
+(the incremental file gets freshly truncated on each `main()` run) rather than adding
+resume-from-partial complexity under time pressure -- a fresh, uninterrupted, caffeinated run
+should complete in the ~5.5-6hr estimate without another multi-hour stall.
