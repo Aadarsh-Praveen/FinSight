@@ -40,14 +40,18 @@ A user asks: *"Why did revenue increase from November 2019 to December 2019?"*
    > Confidence: high."*
 
    Every figure traces back to a real tool call, and the >100% share is not a data or scoring
-   error: the investigator's own category breakdown shows Suits & Sport Coats grew +$2,238.35 while
-   several other categories declined in the same period (Tops & Tees −$461.87, Suits −$459.54,
-   Outerwear & Coats −$210.33) — a single category's delta can exceed the smaller *net* change when
-   other categories move in the opposite direction. This is also one of only two "high"-confidence
-   outliers in the 13-task `clean_attribution` set, not representative of the dataset generally —
-   the systematic search behind this task type found the typical month-pair has no single
-   category above ~48% of net change (see `eval/README.md`), which is exactly why
-   `calibrated_confidence` is graded per-task against a live-recomputed share rather than assumed.
+   error: FinSight's `share_of_total_delta_pct` is always **top driver's delta ÷ net
+   period-over-period delta** — the same metric in every `clean_attribution` task, this one
+   included — not a share of gross/absolute category movement (which would be bounded at 100% by
+   construction; recomputing this same trial's 26-category breakdown that way gives 35.2%, not
+   110.56%). Net-change share is mathematically unbounded above 100% whenever other categories move
+   in the opposite direction of the top driver, as they do here (Tops & Tees −$461.87, Suits
+   −$459.54, Outerwear & Coats −$210.33, against Suits & Sport Coats' +$2,238.35). This is also one
+   of only two "high"-confidence outliers in the 13-task `clean_attribution` set, not representative
+   of the dataset generally — the systematic search behind this task type found the typical
+   month-pair has no single category above ~48% of net change (see `eval/README.md`), which is
+   exactly why `calibrated_confidence` is graded per-task against a live-recomputed share rather
+   than assumed.
 5. **Verifier** independently checks that every claim in the report is grounded in real tool output
    before it's returned; if it finds an unsupported claim, it kicks the loop back to the reporter
    (up to 3 retries) rather than shipping a fabrication.
