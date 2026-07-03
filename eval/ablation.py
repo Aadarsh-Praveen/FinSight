@@ -295,6 +295,21 @@ def preflight_reverify(tasks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]
 # --- Trial execution -------------------------------------------------------------------------
 
 
+def _driver_named_as_cause(report: dict[str, Any], category: str) -> bool:
+    """Config-agnostic driver check: does the report's own root_cause/summary text name
+    `category` as (part of) the explanation for the change?
+
+    Deliberately reads only the final report text, not any config-specific internal state
+    (e.g. the investigator sub-agent's `top_driver` field), because that state only exists for
+    multi-agent configs -- scoring single_agent against structured state it never produces
+    while scoring multi-agent configs against their own structured state would measure the two
+    arms with different instruments and confound the comparison. Same function, same input
+    shape (report text), applied identically to all three ablation configs.
+    """
+    text = f"{report.get('root_cause', '')} {report.get('summary', '')}".lower()
+    return category.lower() in text
+
+
 def run_single_trial(config_name: str, task: dict[str, Any], trial_idx: int) -> dict[str, Any]:
     session_service = InMemorySessionService()
     session = asyncio.run(session_service.create_session(app_name=APP_NAME, user_id="ablation"))
@@ -363,11 +378,11 @@ def run_single_trial(config_name: str, task: dict[str, Any], trial_idx: int) -> 
         dim for dim, tools in DIMENSION_TOOLS.items() if tools & set(tool_calls)
     }
     if ground_truth["largest_driver_category"] is not None:
-        actual_driver = investigation.get("top_driver") if investigation else None
-        result["programmatic"]["largest_driver_category_match"] = (
-            actual_driver == ground_truth["largest_driver_category"]
+        driver_match = _driver_named_as_cause(report, ground_truth["largest_driver_category"])
+        result["programmatic"]["largest_driver_category_match"] = driver_match
+        result["programmatic"]["actual_driver"] = (
+            ground_truth["largest_driver_category"] if driver_match else None
         )
-        result["programmatic"]["actual_driver"] = actual_driver
 
     missing_dimensions = set(ground_truth["required_dimensions"]) - examined_dimensions
     result["programmatic"]["required_dimensions_examined"] = not missing_dimensions
