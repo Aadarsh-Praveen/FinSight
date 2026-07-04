@@ -15,7 +15,7 @@
 | 5 | Full multi-agent workflow | ✅ Done | `0686aae` | SequentialAgent, structured hand-offs |
 | 6 | Guardrails & security | ✅ Done | `1aaaac2` | 17 tests pass; HITL resume has a caveat |
 | 7 | Verifier agent | ✅ Done | `ffd359f` | retry loop verified live, both pass/fail paths |
-| 8 | Skills, memory, observability | ⬜ Not started | — | |
+| 8 | Skills, memory, observability | ✅ Done | `d972f0f` | 3 SKILL.md playbooks, org-context memory (found+fixed a real ADK LoadMemoryTool crash), structured logging + local OTel tracing |
 | 9 | Eval harness + benchmark + ablation | ✅ Done | `e5ecde6` | 34-task benchmark, 171-trial ablation, MAST classifier, self-caught scoring bug; see `FINDINGS.md` |
 | 10 | Deploy, CI, submission packaging | ⬜ Not started | — | |
 

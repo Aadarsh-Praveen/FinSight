@@ -109,6 +109,9 @@ This exact trace — real report text, real tool calls, real driver attribution 
 | Safety guardrails (defense in depth) | `finsight/guardrails/` — read-only SQL, PII redaction, tool-output injection guard; **measured**, not just implemented, against 5 direct-injection adversarial tasks (`FINDINGS.md` findings 3/4) |
 | Human-in-the-loop approval | `finsight/agents/reporter.py` — `require_confirmation` on the recommendation tool; documented ADK limitation on resuming HITL confirmation across nested agents, workaround shipped |
 | Rigorous, adversarial evaluation | `eval/` — 34-task benchmark, mixed deterministic + LLM-judge scoring, 3-config × 3-trial ablation, MAST failure-taxonomy classification |
+| Agent skills (progressive disclosure) | `finsight/skills/` — 3 real `SKILL.md` playbooks (`anomaly-triage`, `driver-attribution-calibration`, `seasonality-check`) loaded via ADK's actual skill mechanism (`load_skill_from_dir` + `SkillToolset`), each with a `references/` tier for on-demand detail |
+| Long-term memory | `finsight/memory/session.py` — org-context (category→owner) seeded into a `BaseMemoryService` and searched via a `load_memory` tool on the reporter; documented process-local durability limitation, and a real bug found/fixed where ADK's own `LoadMemoryTool` crashes with no `memory_service` wired (the default under plain `adk web`/`adk run`) |
+| Observability | `finsight/observability.py` — structured JSONL logging of every tool call (agent, tool, latency, error) via a callback pair on all 6 agents, plus local OpenTelemetry tracing through ADK's own `SqliteSpanExporter` as the pre-deploy substitute for Cloud Trace |
 
 ## 5. Evaluation & results — leading with numbers
 
@@ -194,10 +197,9 @@ FinOps-style agent:
 ## Open items before this is submission-ready
 
 - Fill in repo/demo/video links once available.
-- Phase 8 (skills, memory, Cloud Trace observability) and Phase 10 (Cloud Run deploy, CI) are not
-  started per `PROGRESS.md` — this draft does not claim them. If time allows before the deadline,
-  Phase 10's Cloud Run deploy is the highest-value remaining item for the "Links" section; Phase 8
-  is explicitly the first thing `BUILD_PLAN.md`'s risk register says to cut.
+- Phase 8 (skills, org-context memory, structured logging + local tracing) is now done -- see
+  §4's course-concepts table. Cloud Trace itself (vs. the local SQLite substitute) and Phase 10
+  (Cloud Run deploy, CI) are in progress; update the "Links" section once the deploy URL exists.
 - Resume-bullet fill-ins (`BUILD_PLAN.md` §4) can now use real numbers, e.g. "a verifier-agent
   ablation on reporter-level fabrication improved task success from 33%→67%, while surfacing (not
   hiding) a 37.8% incorrect-verification rate on upstream corruption it can't see."

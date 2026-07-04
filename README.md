@@ -98,6 +98,7 @@ python eval/ablation.py --task-ids=id1,id2,...    # a custom task subset
 
 ## Project status
 
-Phases 0-7 (core multi-agent pipeline, guardrails, verifier) and Phase 9 (evaluation harness,
-benchmark, ablation) are done. See `PROGRESS.md` for the full phase-by-phase build log and
-`BUILD_PLAN.md` for the original implementation plan.
+Phases 0-9 are done (core multi-agent pipeline, guardrails, verifier, skills/memory/observability,
+evaluation harness/benchmark/ablation). Phase 10 (Cloud Run deploy, CI) is in progress. See
+`PROGRESS.md` for the full phase-by-phase build log and `BUILD_PLAN.md` for the original
+implementation plan.
