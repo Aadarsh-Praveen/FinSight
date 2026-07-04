@@ -9,6 +9,7 @@ set -uo pipefail
 TOOLBOX_PORT=5000
 TOOLBOX_READY_TIMEOUT_SECONDS=30
 APP_PORT="${PORT:-8080}"
+DB_PATH="${DB_PATH:-/app/finsight_sessions.db}"
 
 cd /app/mcp-toolbox
 toolbox --config tools.yaml --port "$TOOLBOX_PORT" --address 127.0.0.1 &
@@ -32,9 +33,14 @@ done
 echo "entrypoint: MCP Toolbox is ready after ${elapsed}s."
 
 cd /app
-adk web --host 0.0.0.0 --port "$APP_PORT" /app/finsight &
+# Sessions persist across restarts via DatabaseSessionService (SQLite, see DB_PATH) -- this is
+# an ADK CLI flag, not application code; agents are unaware of which session backend is in use.
+# On Cloud Run, DB_PATH lives on the container's local (ephemeral) disk unless a persistent
+# volume is mounted -- see README.md's "Session persistence" section for the honest limitation
+# and the documented Cloud SQL upgrade path.
+adk web --host 0.0.0.0 --port "$APP_PORT" --session_service_uri="sqlite:///${DB_PATH}" /app/finsight &
 APP_PID=$!
-echo "entrypoint: adk web (pid $APP_PID) starting on 0.0.0.0:${APP_PORT}."
+echo "entrypoint: adk web (pid $APP_PID) starting on 0.0.0.0:${APP_PORT}, sessions at ${DB_PATH}."
 
 # If either process dies, tear down the other and exit non-zero so Cloud Run marks the
 # container failed instead of continuing to serve with a dead dependency.
