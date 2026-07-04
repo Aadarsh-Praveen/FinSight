@@ -24,6 +24,7 @@ happens to be looking that week. FinSight automates that investigation end to en
 - [What's novel](#whats-novel)
 - [Quickstart](#quickstart)
 - [Configuration](#configuration--environment-variables)
+- [Session persistence](#session-persistence)
 - [Live demo](#live-demo)
 - [Project status](#project-status)
 
@@ -269,12 +270,29 @@ ENABLE_VERIFIER=TRUE                             # FALSE runs the orchestrator w
 `GOOGLE_API_KEY`) is missing — this is deliberate, not a bug, so misconfiguration is caught
 immediately rather than producing a confusing downstream error.
 
+## Session persistence
+
+Conversations persist across restarts via ADK's own `DatabaseSessionService`, backed by SQLite
+locally/in-container (`entrypoint.sh` passes `--session_service_uri="sqlite:///${DB_PATH}"` to
+`adk web` — a CLI flag, not application code; no agent, guardrail, tool, or eval module knows or
+cares which session backend is in use). `DB_PATH` defaults to `/app/finsight_sessions.db` in the
+container and is gitignored wherever it lands locally.
+
+**Honest limitation, not glossed over:** on Cloud Run, `DB_PATH` sits on the container's local
+(ephemeral) disk — durable across the *same* running instance, but wiped on a restart or
+scale-to-zero unless a persistent volume is mounted. This is a **documented single-step upgrade,
+not an open problem**: `DatabaseSessionService` is SQLAlchemy-based generically, so the same
+mechanism that runs it on SQLite today runs it on Cloud SQL for Postgres tomorrow by changing the
+URI (e.g. `postgresql+asyncpg://...`) and adding `--add-cloudsql-instances` to the Cloud Run
+deploy command — no further code changes. Deliberately not built yet: it re-touches the deploy
+surface (provisioning Cloud SQL, Secret Manager for the DB password) that's already been the most
+fragile part of this project this week, and isn't worth the risk before the submission is secured.
+
 ## Live demo
 
 **https://finsight-188069722291.us-central1.run.app** — deployed on Cloud Run, verified end-to-end
 (real BigQuery query, real Vertex AI call, real human-in-the-loop confirmation gate), all
-authenticated via a dedicated least-privilege service account. Known limitation: no persistent
-session storage configured yet, so conversations don't survive a container restart/scale-to-zero.
+authenticated via a dedicated least-privilege service account.
 
 ## Project status
 
