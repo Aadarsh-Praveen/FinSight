@@ -1023,3 +1023,33 @@ instead of local .adk storage"`) -- conversations don't survive a container rest
 Fixing this needs `--session_service_uri=sqlite://` pointed at a mounted volume, or a managed DB;
 not done as part of this deploy pass. CI (`.github/workflows/ci.yml`, currently a TODO placeholder)
 is also still outstanding for Phase 10.
+
+### 2026-07-04 — CI added, after auditing which tests are actually offline-safe
+
+Asked to confirm the Kaggle deadline before this work -- no specific competition URL or exact name
+exists anywhere in the repo (`BUILD_PLAN.md` itself flags the deadline as an unresolved human
+verification step), so this wasn't something guessable/searchable with confidence; deferred to the
+user's own manual check rather than risk presenting a wrong competition page as authoritative.
+
+**Test audit, checked empirically rather than assumed:** only 3 of 20 tests need real network
+access -- the 3 in `tests/test_verifier.py` already marked (previously `@pytest.mark.llm`, renamed
+to `@pytest.mark.live` for clarity: "needs real network access -- live BigQuery, Vertex AI/Gemini,
+or MCP Toolbox"). `tests/test_agents_smoke.py` and `tests/test_tools.py` are empty TODO stubs (zero
+tests). The other 17 (`tests/test_guardrails.py`) are pure pattern-matching/callback-logic tests,
+no network.
+
+**Found a real CI-blocking issue by actually simulating a clean machine**, not assuming the marker
+split was sufficient: `finsight/config.py`'s `settings` is a module-level singleton that raises
+`RuntimeError` if `REQUIRED_VARS` are missing -- and pytest imports every test file (including
+`test_verifier.py`) during collection, before any `-m` marker filter applies. Confirmed by actually
+hiding `.env` and stripping the environment (`env -i`): collection itself crashed, `-m "not live"`
+never got a chance to help. Fixed by setting harmless placeholder values (not real credentials --
+the offline tests never make a network call, they just need `Settings` to construct) as `env:` in
+`ci.yml` itself. Verified the fix the same way: reran with `.env` hidden and only the placeholder
+vars set -- 17 passed, 3 deselected, no real GCP/Gemini/toolbox access anywhere.
+
+`ruff check .` had one real (auto-fixed) unsorted-import error in `finsight/observability.py`,
+caught before it could redden the very first CI run.
+
+`.github/workflows/ci.yml`: checkout -> Python 3.11 -> `pip install -r requirements.txt` ->
+`ruff check .` -> `pytest -q -m "not live"`, with the placeholder env vars set at the job level.

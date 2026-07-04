@@ -1,2 +1,37 @@
-# Lint + tests on push.
-# TODO(Phase 10): implement (ruff check . && pytest).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    # No GCP auth, no AI Studio key, no MCP Toolbox server -- deliberately. This job only runs
+    # the offline-safe test suite (`-m "not live"`); the 3 tests needing real BigQuery/Vertex AI
+    # calls are marked `@pytest.mark.live` (see pyproject.toml) and excluded here.
+    env:
+      GOOGLE_CLOUD_PROJECT: ci-placeholder
+      GOOGLE_CLOUD_LOCATION: us-central1
+      GOOGLE_GENAI_USE_VERTEXAI: "TRUE"
+      BIGQUERY_PROJECT: ci-placeholder
+      BIGQUERY_DATASET: ci-placeholder
+      MODEL_ROUTER: ci-placeholder
+      MODEL_WORKER: ci-placeholder
+      MODEL_VERIFIER: ci-placeholder
+      TOOLBOX_URL: http://127.0.0.1:5000
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Test (offline-safe only)
+        run: pytest -q -m "not live"

@@ -83,11 +83,10 @@ def enable_local_tracing(db_path: str = DEFAULT_TRACE_DB_PATH) -> None:
     if _tracing_enabled:
         return
 
+    from google.adk.telemetry.sqlite_span_exporter import SqliteSpanExporter
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-    from google.adk.telemetry.sqlite_span_exporter import SqliteSpanExporter
 
     provider = TracerProvider()
     provider.add_span_processor(BatchSpanProcessor(SqliteSpanExporter(db_path=db_path)))

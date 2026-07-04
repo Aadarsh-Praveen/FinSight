@@ -94,7 +94,7 @@ def _run_verifier(state: dict) -> dict:
     }
 
 
-@pytest.mark.llm
+@pytest.mark.live
 def test_verifier_fails_unsupported_claim():
     state = dict(BASE_STATE)
     state["report"] = {
@@ -114,7 +114,7 @@ def test_verifier_fails_unsupported_claim():
     assert result["escalated"] is False
 
 
-@pytest.mark.llm
+@pytest.mark.live
 def test_verifier_passes_grounded_report():
     state = dict(BASE_STATE)
     state["report"] = {
@@ -199,7 +199,7 @@ def _build_fault_injection_orchestrator() -> SequentialAgent:
     return SequentialAgent(name="orchestrator", sub_agents=[build_planner_agent(), loop])
 
 
-@pytest.mark.llm
+@pytest.mark.live
 def test_retry_loop_catches_and_corrects_fabricated_claim():
     session_service = InMemorySessionService()
     session = asyncio.run(

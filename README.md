@@ -86,7 +86,7 @@ adk web finsight
 Run the fast test suite (guardrails + verifier unit tests, no live LLM calls):
 
 ```bash
-pytest -q -m "not llm"
+pytest -q -m "not live"
 ```
 
 Run the eval harness (requires live BigQuery + Gemini access):

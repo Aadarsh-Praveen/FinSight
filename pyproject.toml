@@ -9,5 +9,5 @@ select = ["E", "F", "I"]
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
-    "llm: makes real LLM calls (network + credentials required); excluded via `-m 'not llm'`.",
+    "live: needs real network access -- live BigQuery, Vertex AI/Gemini, or MCP Toolbox; excluded via `-m 'not live'` (e.g. in CI, which has none of the three).",
 ]
