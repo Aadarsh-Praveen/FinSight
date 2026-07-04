@@ -21,6 +21,7 @@ venv/
 KAGGLE_WRITEUP.md
 PROGRESS.md
 BUILD_PLAN.md
+VIDEO_SCRIPT.md
 BUILD_PLAN_ADDENDUM.md
 
 \# Eval outputs: keep the small aggregate summary, ignore the bulky raw per-trial dumps
