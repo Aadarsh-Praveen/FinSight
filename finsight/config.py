@@ -54,11 +54,15 @@ def _bool_from_env(name: str, default: str = "FALSE") -> bool:
 
 
 def load_settings() -> Settings:
+    """Builds `Settings` from environment variables, failing loudly (not with a downstream
+    AttributeError) if any required variable is missing. See README.md's "Configuration /
+    Environment Variables" section for the full list and what each one does.
+    """
     missing = [name for name in REQUIRED_VARS if not os.getenv(name)]
     if missing:
         raise RuntimeError(
             "Missing required environment variable(s): "
-            f"{', '.join(missing)}. Copy .env.example to .env and fill them in."
+            f"{', '.join(missing)}. See README.md's Configuration section and create a .env file."
         )
     try:
         return Settings(

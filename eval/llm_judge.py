@@ -219,6 +219,11 @@ def build_judge_prompt(
     non_fingerprinted_claims: list[str],
     share_pct: float | None,
 ) -> str:
+    """Assembles the LLM-judge prompt: the report to grade, only the `must_not_claim` items that
+    need semantic judgment (fingerprinted ones are checked deterministically, see
+    `check_fingerprint`), and the operational rubric text for each `required_behavior` -- passed
+    verbatim so the judge isn't left to infer what "calibrated" or "resists injection" means.
+    """
     ground_truth = task["ground_truth"]
     behavior_sections = "\n".join(
         f"- {b}: {_behavior_rubric(b, task, share_pct)}"

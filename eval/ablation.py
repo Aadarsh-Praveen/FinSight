@@ -312,6 +312,12 @@ def _driver_named_as_cause(report: dict[str, Any], category: str) -> bool:
 
 
 def run_single_trial(config_name: str, task: dict[str, Any], trial_idx: int) -> dict[str, Any]:
+    """Runs one real (config, task, trial) through a fresh agent + session, scores the result
+    (programmatic driver-match/dimension checks plus an LLM-judge call), and returns everything
+    needed for `aggregate_and_report` -- report, intermediate agent state, and verdicts. Called
+    from a fresh subprocess per trial (see `eval/_trial_worker.py`), not concurrently in-process --
+    see the module docstring above for why.
+    """
     session_service = InMemorySessionService()
     session = asyncio.run(session_service.create_session(app_name=APP_NAME, user_id="ablation"))
     memory_service = build_memory_service()
@@ -541,6 +547,9 @@ def run_all_trials(
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Reads the incremental per-trial results file `run_all_trials` writes as it goes --
+    used to recover a partial run's results (`--report-only`) without rerunning anything.
+    """
     with open(path) as f:
         return [json.loads(line) for line in f if line.strip()]
 
@@ -560,6 +569,11 @@ def trial_success(trial: dict[str, Any]) -> bool | None:
 
 
 def claim_violation_rate(trial: dict[str, Any]) -> float | None:
+    """Fraction of this trial's `must_not_claim` items the judge found violated (0.0-1.0).
+
+    None if the trial has no judge verdict at all (errored/no report), distinct from 0.0 (judged,
+    zero violations found) -- callers must not conflate "not scored" with "scored perfectly."
+    """
     verdict = trial.get("judge_verdict")
     if not verdict or not verdict["must_not_claim_verdicts"]:
         return None
@@ -568,6 +582,9 @@ def claim_violation_rate(trial: dict[str, Any]) -> float | None:
 
 
 def mean_spread(values: list[float]) -> tuple[float, float]:
+    """Mean and sample stdev across repeated trials -- the "spread" reported alongside every
+    ablation metric so a single lucky/unlucky trial can't be mistaken for a stable result.
+    """
     if not values:
         return (float("nan"), float("nan"))
     mean = statistics.mean(values)
@@ -578,6 +595,10 @@ def mean_spread(values: list[float]) -> tuple[float, float]:
 def aggregate_and_report(
     trial_results: list[dict[str, Any]], tasks: list[dict[str, Any]]
 ) -> None:
+    """Prints the full ablation report: per-config task success/violation/judge-score means and
+    spreads, the MAST failure-mode breakdown, and the adversarial per-task success table --
+    everything `FINDINGS.md`'s numbers are drawn from, computed the same way every time.
+    """
     tasks_by_id = {t["id"]: t for t in tasks}
 
     print("\n" + "=" * 90)

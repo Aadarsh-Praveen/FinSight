@@ -18,6 +18,9 @@ _RATE_LIMIT_MARKERS = ("429", "RESOURCE_EXHAUSTED", "rate limit", "quota")
 
 
 def is_rate_limit_error(exc: Exception) -> bool:
+    """Whether `exc` looks like a rate-limit/quota error worth retrying, as opposed to a real
+    failure (bad request, auth error, etc.) that retrying would just repeat pointlessly.
+    """
     text = str(exc)
     return any(marker.lower() in text.lower() for marker in _RATE_LIMIT_MARKERS)
 

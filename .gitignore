@@ -1,5 +1,6 @@
 \# Secrets
 .env
+.env.example
 *.json.key
 service-account*.json
 
@@ -15,8 +16,17 @@ __pycache__/
 .venv/
 venv/
 
-\# Eval outputs
-eval/results/
+\# Local-only planning/session docs -- not part of the public showcase (see README.md /
+\# FINDINGS.md / eval/README.md for the committed, public-facing story)
+KAGGLE_WRITEUP.md
+PROGRESS.md
+BUILD_PLAN.md
+BUILD_PLAN_ADDENDUM.md
+
+\# Eval outputs: keep the small aggregate summary, ignore the bulky raw per-trial dumps
+eval/results/*
+!eval/results/SUMMARY.json
+!eval/results/README.md
 
 \# Observability runtime artifacts (finsight/observability.py)
 finsight_tool_calls.jsonl
