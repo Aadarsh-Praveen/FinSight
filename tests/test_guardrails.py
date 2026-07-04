@@ -139,9 +139,14 @@ class TestHumanInTheLoopRecommendation:
         }
 
     def test_reporter_wraps_it_with_require_confirmation(self):
+        from google.adk.tools import FunctionTool
+
         from finsight.agents.reporter import build_reporter_agent
 
         agent = build_reporter_agent()
-        (tool,) = agent.tools
-        assert tool.func is propose_recommendation
+        (tool,) = [
+            t
+            for t in agent.tools
+            if isinstance(t, FunctionTool) and getattr(t, "func", None) is propose_recommendation
+        ]
         assert tool._require_confirmation is True

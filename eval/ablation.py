@@ -61,6 +61,7 @@ from eval.run_eval import DIMENSION_TOOLS, _last_state_delta, _tool_calls, load_
 from finsight.agents.orchestrator import build_orchestrator_agent
 from finsight.agents.schemas import FinOpsReport
 from finsight.config import settings
+from finsight.memory.session import build_memory_service, seed_org_context
 from finsight.tools.mcp_bigquery import load_finops_readonly_tools
 
 TRIALS_PER_TASK = 3
@@ -313,8 +314,15 @@ def _driver_named_as_cause(report: dict[str, Any], category: str) -> bool:
 def run_single_trial(config_name: str, task: dict[str, Any], trial_idx: int) -> dict[str, Any]:
     session_service = InMemorySessionService()
     session = asyncio.run(session_service.create_session(app_name=APP_NAME, user_id="ablation"))
+    memory_service = build_memory_service()
+    asyncio.run(seed_org_context(memory_service))
     agent = CONFIGS[config_name]()
-    runner = Runner(agent=agent, app_name=APP_NAME, session_service=session_service)
+    runner = Runner(
+        agent=agent,
+        app_name=APP_NAME,
+        session_service=session_service,
+        memory_service=memory_service,
+    )
 
     def _run() -> list:
         return list(

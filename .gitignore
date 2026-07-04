@@ -18,6 +18,11 @@ venv/
 \# Eval outputs
 eval/results/
 
+\# Observability runtime artifacts (finsight/observability.py)
+finsight_tool_calls.jsonl
+finsight_traces.db
+finsight_sessions.db
+
 \# adk run/web local session + artifact storage
 .adk/
 */agents_log/

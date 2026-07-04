@@ -9,13 +9,26 @@ human yet, so the tool call comes back requiring approval -- the report must ref
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from google.adk import Agent
+from google.adk.skills import load_skill_from_dir
 from google.adk.tools import FunctionTool
+from google.adk.tools.skill_toolset import SkillToolset
 
 from finsight.agents.schemas import FinOpsReport
 from finsight.config import settings
 from finsight.guardrails import DEFAULT_AFTER_TOOL_CALLBACKS
+from finsight.memory.session import build_load_memory_tool
+from finsight.observability import log_tool_call_end, log_tool_call_start
 from finsight.tools.finops_tools import propose_recommendation
+
+_SKILLS_DIR = Path(__file__).parent.parent / "skills"
+_SKILL_NAMES = ("anomaly-triage", "driver-attribution-calibration", "seasonality-check")
+
+
+def _load_finsight_skills() -> list:
+    return [load_skill_from_dir(_SKILLS_DIR / name) for name in _SKILL_NAMES]
 
 INSTRUCTION = """
 You are FinSight's reporter agent. You write the final brief for a FinOps stakeholder, using
@@ -29,7 +42,11 @@ flagged confidence not matching the evidence, recompute confidence from
 investigation.share_of_total_delta_pct per the rule below).
 
 Steps:
-1. Draft summary, root_cause, evidence, recommendation, and confidence:
+1. Before drafting, consider whether a skill applies, and load it if so: `anomaly-triage` for the
+   general order of checks before naming a cause, `driver-attribution-calibration` for the exact
+   confidence-tier thresholds (authoritative -- use this instead of recomputing thresholds from
+   memory), and `seasonality-check` when the top driver category has an obvious seasonal story.
+2. Draft summary, root_cause, evidence, recommendation, and confidence:
    - summary: 1-2 sentences directly answering {plan}'s question, citing the headline
      delta_revenue and delta_pct from {analyst_findings}.
    - root_cause: name {investigation}'s top_driver as the likely driver IF
@@ -38,9 +55,14 @@ Steps:
    - evidence: a list of concrete cited figures, each a short string quoting the actual numbers
      from state (current/prior revenue, the forecast surprise, the top category's delta, etc).
    - recommendation: one concrete, actionable next step someone could take given this finding.
-   - confidence: "high" if share_of_total_delta_pct >= 60, "medium" if >= 40, "low" if >= 20,
-     otherwise "insufficient evidence".
-2. Before finalizing, call propose_recommendation(recommendation=..., confidence=...) with the
+     If {investigation} names a top_driver, call load_memory(query=top_driver's category name)
+     to check org-context memory for a category owner; if found, address the recommendation to
+     that owner by name. If not found, give the recommendation without a named owner -- do not
+     invent one.
+   - confidence: per the `driver-attribution-calibration` skill's thresholds (high >= 60,
+     medium >= 40, low >= 20, otherwise insufficient evidence, all against
+     investigation.share_of_total_delta_pct).
+3. Before finalizing, call propose_recommendation(recommendation=..., confidence=...) with the
    text you drafted. This call requires human confirmation and will not silently succeed on a
    fresh run -- read its result:
    - If it returns an error about requiring confirmation or being rejected, set
@@ -69,8 +91,13 @@ def build_reporter_agent(require_confirmation: bool = True) -> Agent:
         model=settings.model_verifier,
         description="Synthesizes the final structured, cited FinOps report.",
         instruction=INSTRUCTION,
-        tools=[FunctionTool(propose_recommendation, require_confirmation=require_confirmation)],
-        after_tool_callback=DEFAULT_AFTER_TOOL_CALLBACKS,
+        tools=[
+            FunctionTool(propose_recommendation, require_confirmation=require_confirmation),
+            SkillToolset(skills=_load_finsight_skills()),
+            build_load_memory_tool(),
+        ],
+        before_tool_callback=log_tool_call_start,
+        after_tool_callback=[*DEFAULT_AFTER_TOOL_CALLBACKS, log_tool_call_end],
         output_schema=FinOpsReport,
         output_key="report",
     )

@@ -24,6 +24,7 @@ from google.adk import Agent
 from finsight.agents.schemas import VerifierResult
 from finsight.config import settings
 from finsight.guardrails import DEFAULT_AFTER_TOOL_CALLBACKS
+from finsight.observability import log_tool_call_end, log_tool_call_start
 from finsight.tools.finops_tools import check_text_for_policy_violations
 
 INSTRUCTION = """
@@ -78,7 +79,8 @@ def build_verifier_agent() -> Agent:
         "compliance before it's finalized; ends the retry loop on pass.",
         instruction=INSTRUCTION,
         tools=[check_text_for_policy_violations],
-        after_tool_callback=DEFAULT_AFTER_TOOL_CALLBACKS,
+        before_tool_callback=log_tool_call_start,
+        after_tool_callback=[*DEFAULT_AFTER_TOOL_CALLBACKS, log_tool_call_end],
         after_agent_callback=_escalate_when_verification_passed,
         output_schema=VerifierResult,
         output_key="verification",

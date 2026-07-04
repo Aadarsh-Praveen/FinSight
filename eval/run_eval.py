@@ -21,6 +21,7 @@ from google.genai import types
 from eval.llm_judge import judge_report
 from eval.rate_limit import with_retry
 from finsight.agents.orchestrator import build_orchestrator_agent
+from finsight.memory.session import build_memory_service, seed_org_context
 
 BENCHMARK_PATH = Path(__file__).parent / "benchmark" / "finops_tasks.jsonl"
 
@@ -61,12 +62,15 @@ def run_task(task: dict[str, Any], enable_verifier: bool = True) -> dict[str, An
     """Runs one task through the real orchestrator once and scores it. One real trial."""
     session_service = InMemorySessionService()
     session = asyncio.run(session_service.create_session(app_name=APP_NAME, user_id=USER_ID))
+    memory_service = build_memory_service()
+    asyncio.run(seed_org_context(memory_service))
     runner = Runner(
         agent=build_orchestrator_agent(
             enable_verifier=enable_verifier, require_recommendation_confirmation=False
         ),
         app_name=APP_NAME,
         session_service=session_service,
+        memory_service=memory_service,
     )
 
     def _run() -> list:

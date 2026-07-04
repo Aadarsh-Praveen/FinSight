@@ -1,0 +1,8 @@
+{
+  "_comment": "Illustrative sample org metadata -- thelook_ecommerce has no owner field, so this is a synthetic category-to-owner map standing in for a real org chart / CMDB a production FinOps deployment would connect to. Category names match real thelook_ecommerce categories so lookups are demonstrable against real investigation output.",
+  "Outerwear & Coats": "Jane Kim, Apparel Merchandising",
+  "Suits & Sport Coats": "Marcus Webb, Formalwear Merchandising",
+  "Swim": "Priya Anand, Seasonal Categories",
+  "Fashion Hoodies & Sweatshirts": "Diego Torres, Casualwear Merchandising",
+  "Dresses": "Sara Lindqvist, Women's Apparel"
+}
