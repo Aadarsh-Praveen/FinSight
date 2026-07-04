@@ -17,13 +17,14 @@
 | 7 | Verifier agent | ✅ Done | `ffd359f` | retry loop verified live, both pass/fail paths |
 | 8 | Skills, memory, observability | ✅ Done | `d972f0f` | 3 SKILL.md playbooks, org-context memory (found+fixed a real ADK LoadMemoryTool crash), structured logging + local OTel tracing |
 | 9 | Eval harness + benchmark + ablation | ✅ Done | `e5ecde6` | 34-task benchmark, 171-trial ablation, MAST classifier, self-caught scoring bug; see `FINDINGS.md` |
-| 10 | Deploy, CI, submission packaging | ⬜ Not started | — | |
+| 10 | Deploy, CI, submission packaging | 🟡 In progress | `e52027f` | Cloud Run deploy live and verified end-to-end; CI still TODO |
 
 Status key: ⬜ Not started · 🟡 In progress · ✅ Done · ⚠️ Blocked
 
 ## Environment facts (fill in once, reference throughout)
 - OS / arch: macOS, arm64 (Apple Silicon)
-- GCP Project ID: `finsight-hackathon-501118`
+- GCP Project ID: `finsight-hackathon-501402` (switched 2026-07-04 from `finsight-hackathon-501118`
+  -- see the 2026-07-04 entry below)
 - Region: `us-central1`
 - Dataset: `bigquery-public-data.thelook_ecommerce` (default)
 - ADK version installed: `google-adk` 2.3.0
@@ -943,3 +944,82 @@ tables.
 **Next:** assemble `FINDINGS.md` consolidating all of Phase 9's results (full ablation + closed
 clean_attribution gap + adversarial severity table + harness bug + methodology notes) before any
 Kaggle writeup prose.
+
+### 2026-07-04 — GCP project switch, Phase 8 (skills/memory/observability), Cloud Run deploy live
+
+**Project switch.** The original `finsight-hackathon-501118` project hit a `BILLING_DISABLED` error
+mid-session on Vertex AI calls that had worked moments earlier -- investigated rather than assumed
+transient: `gcloud billing projects describe` showed `billingEnabled: true`, contradicting the API
+error. Root cause was unrelated to billing config -- the user redirected the deploy target to a
+different, healthy project (`finsight-hackathon-501402`, billing account `01C685-E0B0E1-4CC917`).
+Found and fixed a second, real mismatch while onboarding it: Application Default Credentials (used
+by the Python SDK, separate from `gcloud`'s own CLI login) were authenticated as
+`aadarshfinsight@gmail.com`, while `praveen.aadarsh@gmail.com` (who owns the new project) had no
+ADC session -- confirmed via `gcloud auth application-default print-access-token` +
+`tokeninfo`. Fixed by re-running `gcloud auth application-default login` as the correct account
+(interactive, done by the user).
+
+**Phase 8 (Skills, memory, observability) -- see `d972f0f`.** All three ADK subsystems are real,
+installed APIs (`google.adk.skills`, `google.adk.memory`, `google.adk.telemetry`), not improvised:
+- 3 `SKILL.md` playbooks (`anomaly-triage`, `driver-attribution-calibration`, `seasonality-check`),
+  loaded via `load_skill_from_dir` + `SkillToolset` into the reporter. Deliberately renamed from
+  BUILD_PLAN's cloud-infra-flavored `rightsizing`/`commitments` -- `thelook_ecommerce` has no
+  compute/commitment data for those concepts to operate on; the replacements are grounded in tools
+  FinSight actually has.
+- Org-context (category -> owner) memory seeded into an `InMemoryMemoryService` via a synthetic
+  session (that service has no direct-write `add_memory`, only session/event ingestion), searched
+  via a `load_memory` tool on the reporter. **Found and fixed a real bug via a deploy smoke test**:
+  ADK's own `LoadMemoryTool` raises `ValueError` outright when no `memory_service` is wired to the
+  Runner -- which is exactly what happens under plain `adk web`/`adk run` (no CLI hook exists to
+  pre-seed a custom memory service). Replaced with a defensive wrapper
+  (`finsight/memory/session.py::load_memory`) that returns an empty result instead of crashing the
+  whole reporter turn. Verified both the crash (before the fix) and the fix, live, inside the
+  eventual deploy container.
+- Structured JSONL tool-call logging (agent, tool, latency, error) via a before/after callback pair
+  on all 6 agents, plus local OpenTelemetry tracing through ADK's own `SqliteSpanExporter` -- a real
+  local substitute for Cloud Trace, not a lesser stand-in wired differently.
+
+**Phase 10 deploy assessment (before building anything).** Asked to choose an architecture for the
+MCP Toolbox (currently a separate local process) on Cloud Run: same container vs. separate Cloud
+Run service vs. swapping to ADK's built-in BigQuery toolset. Recommended and built **same
+container**: a separate service needs cross-service IAM invoker auth for no benefit here, and
+swapping toolsets was rejected on integrity grounds -- ADK's built-in toolset is more general than
+`tools.yaml`'s fixed, parameterized statements, and swapping it in for deploy would silently change
+the read-only-SQL guarantee Phase 6 built and Phase 9 measured, diverging "what's live" from "what
+was evaluated." `Dockerfile` bundles the `toolbox` binary (fetched at build time,
+linux/amd64) + `tools.yaml`; `entrypoint.sh` starts the toolbox on internal port 5000, polls its
+real HTTP readiness (not a fixed sleep) before starting `adk web` on `$PORT`, and exits non-zero
+with a `FATAL` log line if the toolbox never comes up or either process dies later. UI: `adk web`
+directly (real FastAPI server + chat UI, ships free with ADK) -- rejected a custom Gradio/FastAPI
+wrapper as strictly more work for a worse result.
+
+**Local Docker smoke test (required before deploy, per explicit build order) -- full pass**,
+including deliberately testing the failure path (missing env var -> toolbox dies -> entrypoint logs
+`FATAL` and exits 1, not a silent zombie container). This is where the `LoadMemoryTool` crash above
+was actually found -- a real trial through the built image, not just unit tests.
+
+**Cloud Run deploy -- live at `https://finsight-188069722291.us-central1.run.app`.** Service
+account `finsight-run-sa@finsight-hackathon-501402.iam.gserviceaccount.com` created with
+`roles/bigquery.user` + `roles/aiplatform.user` (not `bigquery.dataViewer` --
+`thelook_ecommerce` is already a public dataset; what the SA actually needs is `bigquery.jobs.create`
+in its own project, which `bigquery.user` covers). Two deploy-time permission gaps found and fixed,
+both on this fresh project, neither anticipated by the local smoke test (which used personal ADC,
+not a service account): Cloud Build's default service account
+(`188069722291-compute@developer.gserviceaccount.com`) lacked read access to the Cloud
+Run-managed source-upload GCS bucket -- granted `roles/storage.objectViewer` +
+`roles/logging.logWriter` at the project level, then an explicit bucket-level binding once the
+project-level grant alone didn't resolve a repeat failure. **Verified live, end-to-end, over the
+real public HTTPS API** (not local ADC): created a session, asked a real question, got a real
+BigQuery-grounded driver breakdown, a real Vertex AI call (confirmed via real token-usage
+metadata), and a correctly-triggered `adk_request_confirmation` HITL gate -- proving the
+service-account auth path works for both BigQuery and Vertex AI, and that `adk web`'s own
+confirmation flow functions correctly over its real REST API (distinct from the already-documented,
+narrower issue of resuming a confirmation via a bare programmatic `Runner.run_async` call, which is
+what affects `eval/`, not this path).
+
+**Known limitation, not yet fixed:** ADK auto-detects the Cloud Run runtime and falls back to
+in-memory session storage (log: `"Detected Cloud Run/Kubernetes runtime; using in-memory services
+instead of local .adk storage"`) -- conversations don't survive a container restart or scale-to-zero.
+Fixing this needs `--session_service_uri=sqlite://` pointed at a mounted volume, or a managed DB;
+not done as part of this deploy pass. CI (`.github/workflows/ci.yml`, currently a TODO placeholder)
+is also still outstanding for Phase 10.

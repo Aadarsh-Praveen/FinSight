@@ -188,8 +188,10 @@ FinOps-style agent:
 - GitHub repo: https://github.com/Aadarsh-Praveen/FinSight (public — **not yet pushed past the
   initial commit as of this draft**; all Phase 0-9 work needs an explicit `git push` before this
   link shows anything real)
-- Cloud Run demo: `[not yet deployed — Phase 10 not started; BUILD_PLAN's risk register explicitly
-  treats this as a cuttable stretch behind evals]`
+- Cloud Run demo: https://finsight-188069722291.us-central1.run.app — deployed, verified live
+  end-to-end (real BigQuery query, real Vertex AI call, real HITL confirmation gate). Known
+  limitation: no persistent session storage configured yet, so conversations don't survive a
+  container restart/scale-to-zero (ADK auto-falls-back to in-memory on Cloud Run).
 - Demo video: `[not yet recorded]`
 
 ---
