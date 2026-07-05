@@ -107,7 +107,7 @@ sequenceDiagram
         R-->>V: FinOpsReport (draft)
         V->>V: groundedness + sufficiency + policy checks
         alt fails
-            V-->>R: critique — fix exactly this, retry
+            V-->>A: critique — retry from analyst (whole chain re-runs, not just reporter)
         else passes
             V-->>U: cited FinOpsReport
         end
