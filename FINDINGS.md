@@ -11,6 +11,16 @@ sub-agents), `multi_agent_no_verifier` (planner → analyst → forecaster → i
 reporter, no verify/retry loop), `multi_agent_verifier` (same pipeline wrapped in a `LoopAgent`
 with the verifier, max 3 iterations).
 
+**Note on a system change since this ablation was run:** the deployed forecaster was upgraded to
+BigQuery `AI.FORECAST` (TimesFM) after the results below were measured. Every number in this
+document reflects the deterministic trailing-average baseline that was the sole forecasting
+method during the ablation. This is a documented post-ablation enhancement, not a silent
+divergence: the 34-task benchmark doesn't score forecast accuracy either way (checked before the
+swap, not assumed), so nothing reported below would change if the ablation were rerun today.
+TimesFM's value is probabilistic rather than point-accuracy — its prediction interval surfaces
+real day-to-day revenue volatility this dataset has that the deterministic baseline's single
+point silently hid.
+
 ---
 
 ## 1. Multi-agent decomposition is a task-dependent tradeoff, not a uniform win or loss

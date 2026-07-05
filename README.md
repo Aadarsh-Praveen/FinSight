@@ -78,9 +78,16 @@ flowchart TD
 - **planner** — turns the question into a structured `InvestigationPlan`.
 - **analyst** — pulls real period-over-period totals from BigQuery (`compare_period_over_period`,
   read-only, parameterized SQL via MCP Toolbox — no arbitrary query execution).
-- **forecaster** — a deterministic trailing-average baseline (deliberately not
-  BigQuery `AI.FORECAST`/TimesFM, for reproducibility in the eval harness — see
-  `finsight/agents/forecaster.py`).
+- **forecaster** — forecasts expected current-period revenue via BigQuery's `AI.FORECAST`
+  (TimesFM), with an automatic fallback to a deterministic trailing-average baseline if
+  `AI.FORECAST` errors or times out (`finsight/tools/finops_tools.py::compute_timesfm_forecast`).
+  **Post-ablation enhancement, upgraded after Phase 9:** the deterministic baseline was the sole
+  method used during the evaluation reported in `FINDINGS.md`; the benchmark doesn't score
+  forecast accuracy either way (verified before swapping — see `FINDINGS.md`), so no reported
+  number changes. TimesFM's real value here is probabilistic, not just point-accuracy: its
+  prediction interval surfaces genuine day-to-day revenue volatility this dataset has that the
+  baseline's single point silently hides — in testing, a 90%-confidence interval built from a
+  30-day history actually contained the real subsequent month's outcome.
 - **investigator** — breaks the change down by category, independently computing the driver and
   its share of the net change.
 - **reporter** — writes the final `FinOpsReport`, every figure traceable to a tool call; consults
