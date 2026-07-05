@@ -56,7 +56,7 @@ flowchart TD
 
     subgraph L["LoopAgent — up to 3 iterations"]
         direction LR
-        A["analyst<br/>compare_period_over_period"] --> F["forecaster<br/>trailing-average baseline"]
+        A["analyst<br/>compare_period_over_period"] --> F["forecaster<br/>AI.FORECAST (TimesFM)<br/>+ baseline fallback"]
         F --> I["investigator<br/>category breakdown"]
         I --> R["reporter<br/>skills · memory · HITL"]
         R --> V["verifier<br/>groundedness · sufficiency · policy"]
@@ -65,9 +65,10 @@ flowchart TD
     V -- "fail: critique" --> A
     V -- "pass: escalate" --> OUT["Cited FinOpsReport"]
 
-    G["Guardrails: read-only SQL,<br/>PII redaction, injection guard"] -.-> A
+    G["Guardrails: read-only SQL,<br/>PII redaction, injection guard<br/>(applied across all 6 agents)"] -.-> A
     G -.-> F
     G -.-> I
+    G -.-> R
     G -.-> V
 
     style OUT fill:#34A853,color:#fff
@@ -123,7 +124,7 @@ sequenceDiagram
     loop Up to 3 iterations
         A->>A: compare_period_over_period (BigQuery)
         A-->>Fc: AnalystFindings
-        Fc->>Fc: get_daily_sales + baseline forecast
+        Fc->>Fc: get_daily_sales + AI.FORECAST (TimesFM, baseline fallback)
         Fc-->>I: ForecastResult
         I->>I: get_orders_by_category (BigQuery)
         I-->>R: DriverFinding
