@@ -82,36 +82,7 @@ Every tool call is structured-logged and locally traced (`finsight/observability
 
 ### Request flow, including the retry loop
 
-```mermaid
-sequenceDiagram
-    actor U as User
-    participant P as Planner
-    participant A as Analyst
-    participant Fc as Forecaster
-    participant I as Investigator
-    participant R as Reporter
-    participant V as Verifier
-
-    U->>P: "Why did revenue increase Nov→Dec 2019?"
-    P->>P: get_dataset_date_range (BigQuery)
-    P-->>A: InvestigationPlan
-
-    loop Up to 3 iterations
-        A->>A: compare_period_over_period (BigQuery)
-        A-->>Fc: AnalystFindings
-        Fc->>Fc: get_daily_sales + AI.FORECAST (TimesFM, baseline fallback)
-        Fc-->>I: ForecastResult
-        I->>I: get_orders_by_category (BigQuery)
-        I-->>R: DriverFinding
-        R->>R: load_skill / load_memory / propose_recommendation
-        R-->>V: FinOpsReport (draft)
-        V->>V: groundedness + sufficiency + policy checks
-        alt fails
-            V-->>A: critique — retry from analyst (whole chain re-runs, not just reporter)
-        else passes
-            V-->>U: cited FinOpsReport
-        end
-    end
+![Request flow: user question through planner, then a loop of analyst, forecaster, investigator, reporter, and verifier -- on fail, critique restarts the whole chain from analyst, not just reporter -- on pass, a cited FinOpsReport returns to the user](architecture/request-flow.png)
 ```
 
 ## The headline result
