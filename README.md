@@ -145,18 +145,7 @@ The evaluation's most important finding is that **multi-agent decomposition is a
 tradeoff, not a uniform win**: it beats a single-agent baseline on well-structured analytical
 questions, but loses on the aggregate and on adversarial robustness.
 
-```mermaid
-flowchart LR
-    B["34-task benchmark<br/>171 trials total"] --> SA["single_agent"]
-    B --> MNV["multi_agent_no_verifier"]
-    B --> MV["multi_agent_verifier"]
-    SA --> S1["68.2% aggregate<br/>83.3% clean_attribution<br/>40.0% adversarial"]
-    MNV --> S2["64.4% aggregate<br/>100.0% clean_attribution<br/>33.3% adversarial"]
-    MV --> S3["62.2% aggregate<br/>91.7% clean_attribution<br/>26.7% adversarial"]
-    S1 & S2 & S3 --> AGG["Task-dependent tradeoff,<br/>not a single verdict"]
-
-    style AGG fill:#4285F4,color:#fff
-```
+![The headline result: 34-task benchmark across three ablation configs, converging on a task-dependent tradeoff, not a single verdict](architecture/headline-result.png)
 
 | task type | single_agent | multi_agent_no_verifier | multi_agent_verifier |
 |---|---|---|---|
