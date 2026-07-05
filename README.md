@@ -49,32 +49,7 @@ live-recomputed share rather than assumed (see `eval/README.md`).
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    U["User question"] --> P["planner<br/>InvestigationPlan"]
-    P --> L
-
-    subgraph L["LoopAgent — up to 3 iterations"]
-        direction LR
-        A["analyst<br/>compare_period_over_period"] --> F["forecaster<br/>AI.FORECAST (TimesFM)<br/>+ baseline fallback"]
-        F --> I["investigator<br/>category breakdown"]
-        I --> R["reporter<br/>skills · memory · HITL"]
-        R --> V["verifier<br/>groundedness · sufficiency · policy"]
-    end
-
-    V -- "fail: critique" --> A
-    V -- "pass: escalate" --> OUT["Cited FinOpsReport"]
-
-    G["Guardrails: read-only SQL,<br/>PII redaction, injection guard<br/>(applied across all 6 agents)"] -.-> A
-    G -.-> F
-    G -.-> I
-    G -.-> R
-    G -.-> V
-
-    style OUT fill:#34A853,color:#fff
-    style V fill:#4285F4,color:#fff
-    style G fill:#EA4335,color:#fff
-```
+![FinSight architecture: user question through planner, a LoopAgent (analyst, forecaster, investigator, reporter, verifier) with a critique/retry loop and cross-cutting guardrails, to a cited FinOpsReport](architecture/architecture.png)
 
 - **planner** — turns the question into a structured `InvestigationPlan`.
 - **analyst** — pulls real period-over-period totals from BigQuery (`compare_period_over_period`,
