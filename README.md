@@ -83,7 +83,7 @@ Every tool call is structured-logged and locally traced (`finsight/observability
 ### Request flow, including the retry loop
 
 ![Request flow: user question through planner, then a loop of analyst, forecaster, investigator, reporter, and verifier -- on fail, critique restarts the whole chain from analyst, not just reporter -- on pass, a cited FinOpsReport returns to the user](architecture/request-flow.png)
-```
+
 
 ## The headline result
 
