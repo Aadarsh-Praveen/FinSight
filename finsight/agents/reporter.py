@@ -80,11 +80,20 @@ def build_reporter_agent(require_confirmation: bool = True) -> Agent:
         require_confirmation: gate propose_recommendation behind ADK's HITL tool-confirmation
             (the real product behavior, default True). Set False for automated contexts with no
             human to approve -- e.g. eval/run_eval.py -- where every run would otherwise pause on
-            propose_recommendation's first call. See PROGRESS.md Phase 7: resuming that pause is
-            broken for confirmations raised inside a nested SequentialAgent>LoopAgent>LlmAgent
-            hierarchy, so eval runs can't drive the real confirm/reject flow anyway -- eval scores
-            report *content* (grounding, calibration, refusal, injection-resistance), not the
-            separate HITL mechanism, which already has its own dedicated tests.
+            propose_recommendation's first call.
+
+            Resuming that pause used to be broken for confirmations raised inside a nested
+            SequentialAgent>LoopAgent>LlmAgent hierarchy -- approving would restart the whole
+            orchestrator from `planner` and fail to resolve the tool against the right agent. This
+            is now fixed for the real app: `finsight/agent.py` wraps `root_agent` in an ADK `App`
+            with `ResumabilityConfig(is_resumable=True)`, which lets both `SequentialAgent` and
+            `LoopAgent` correctly resume at the sub-agent that actually raised the confirmation
+            (verified live, in production, with a real confirm -> approve -> resume round trip --
+            see PROGRESS.md). eval/ still uses `require_confirmation=False` regardless -- its
+            Runner is built directly from `build_orchestrator_agent(...)`, bypassing the `App`
+            wrapper entirely, by design (automated runs have no human available to approve, and
+            eval scores report *content*, not the separate HITL mechanism, which has its own
+            dedicated tests) -- not because the underlying resume bug still exists.
     """
     return Agent(
         name="reporter",
