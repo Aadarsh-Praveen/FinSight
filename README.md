@@ -26,7 +26,6 @@ happens to be looking that week. FinSight automates that investigation end to en
 - [Configuration](#configuration--environment-variables)
 - [Session persistence](#session-persistence)
 - [Live demo](#live-demo)
-- [Project status](#project-status)
 
 ## What it does — a real trace, not an illustration
 
@@ -236,11 +235,3 @@ fragile part of this project this week, and isn't worth the risk before the subm
 **https://finsight-188069722291.us-central1.run.app** — deployed on Cloud Run, verified end-to-end
 (real BigQuery query, real Vertex AI call, real human-in-the-loop confirmation gate), all
 authenticated via a dedicated least-privilege service account.
-
-## Project status
-
-Phases 0-9 are done (core multi-agent pipeline, guardrails, verifier, skills/memory/observability,
-evaluation harness/benchmark/ablation, 34-task benchmark with a 171-trial ablation). Phase 10
-(Cloud Run deploy, CI) is in progress — CI is green; deploy is live. Full results and methodology:
-**[`FINDINGS.md`](FINDINGS.md)** (Phase 9 headlines) and **[`eval/README.md`](eval/README.md)**
-(benchmark design, scoring rubrics, dataset-drift handling).
